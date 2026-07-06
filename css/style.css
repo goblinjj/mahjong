@@ -519,6 +519,134 @@ body::before {
   font-size: 26px;
 }
 
+/* ============================================================
+   Tiao (条 / bamboo) & Tong (筒 / dots) — drawn with pure CSS
+   ============================================================ */
+/* Pip size variables, scale with tile size */
+.mj-tile { --dot: 9px; --bw: 5px; --bh: 15px; --pgap: 3px; }
+.mj-tile.sm { --dot: 7px; --bw: 3.5px; --bh: 11px; --pgap: 2px; }
+.mj-tile.lg { --dot: 11px; --bw: 6px; --bh: 19px; --pgap: 3.5px; }
+
+.tile-pips {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--pgap);
+  width: 100%;
+  height: 100%;
+  padding: 4px 5px;
+  box-sizing: border-box;
+}
+
+.pip-row {
+  display: flex;
+  gap: var(--pgap);
+  justify-content: center;
+  align-items: center;
+}
+
+/* Diagonal arrangement for 三筒 */
+.pip-row.diag-0 { align-self: flex-start; }
+.pip-row.diag-1 { align-self: center; }
+.pip-row.diag-2 { align-self: flex-end; }
+
+/* ---- Tong (筒): concentric-ring coins ---- */
+.tong-pips .pip {
+  width: var(--dot);
+  height: var(--dot);
+  border-radius: 50%;
+  background: radial-gradient(circle,
+    var(--suit-tong) 0 26%,
+    #f2f4ff 26% 42%,
+    var(--suit-tong) 42% 100%);
+  box-shadow:
+    inset 0 0 0 0.5px rgba(0, 0, 0, 0.25),
+    0 1px 1px rgba(0, 0, 0, 0.18);
+}
+
+/* 一筒: single large coin with an extra ring */
+.tong-pips[data-n="1"] .pip {
+  width: calc(var(--dot) * 2.3);
+  height: calc(var(--dot) * 2.3);
+  background: radial-gradient(circle,
+    var(--suit-wan) 0 18%,
+    #f2f4ff 18% 30%,
+    var(--suit-tong) 30% 50%,
+    #f2f4ff 50% 62%,
+    var(--suit-tong) 62% 100%);
+}
+
+/* ---- Tiao (条): bamboo canes ---- */
+/* Rows flex so canes auto-shrink when there are more of them (e.g. 8条) */
+.tiao-pips .pip-row {
+  flex: 1 1 0;
+  min-height: 0;
+}
+.tiao-pips:not([data-n="1"]) .pip {
+  width: var(--bw);
+  height: 100%;
+  max-height: var(--bh);
+  border-radius: calc(var(--bw) * 0.5);
+  background:
+    /* bamboo joints */
+    repeating-linear-gradient(0deg,
+      transparent 0 44%,
+      rgba(0, 0, 0, 0.28) 44% 50%,
+      transparent 50% 56%),
+    /* body highlight */
+    linear-gradient(90deg, #0f6a28 0%, #5ccf7e 45%, #0f6a28 100%);
+  box-shadow:
+    inset 0 0 0 0.5px rgba(0, 0, 0, 0.2),
+    0 1px 1px rgba(0, 0, 0, 0.2);
+}
+
+.tiao-pips .pip.red {
+  background:
+    repeating-linear-gradient(0deg,
+      transparent 0 44%,
+      rgba(0, 0, 0, 0.28) 44% 50%,
+      transparent 50% 56%),
+    linear-gradient(90deg, #9c1024 0%, #ff5f6d 45%, #9c1024 100%);
+}
+
+/* 一条: stylized bird (green body, red head) */
+.tiao-pips[data-n="1"] .pip {
+  width: calc(var(--bw) * 2);
+  height: calc(var(--bh) * 1.5);
+  /* teardrop body: rounded top, pointed tail at bottom-left */
+  border-radius: 60% 60% 55% 15% / 65% 65% 40% 40%;
+  transform: rotate(-8deg);
+  background: linear-gradient(150deg, #56cf7c 0%, #1a8a3a 55%, #0d5a24 100%);
+  box-shadow:
+    inset 0 1px 1px rgba(255, 255, 255, 0.45),
+    0 1px 2px rgba(0, 0, 0, 0.25);
+  position: relative;
+}
+/* red head */
+.tiao-pips[data-n="1"] .pip::after {
+  content: '';
+  position: absolute;
+  top: -30%;
+  left: 46%;
+  width: 62%;
+  height: 52%;
+  border-radius: 50%;
+  background: radial-gradient(circle at 38% 32%, #ff6b78 0%, #c41e3a 65%, #8a0f22 100%);
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.25);
+}
+/* wing accent */
+.tiao-pips[data-n="1"] .pip::before {
+  content: '';
+  position: absolute;
+  top: 32%;
+  left: 12%;
+  width: 45%;
+  height: 40%;
+  border-radius: 50% 60% 40% 50%;
+  background: linear-gradient(150deg, rgba(255, 255, 255, 0.35), rgba(255, 255, 255, 0));
+}
+
 /* ---- Tile count badge ---- */
 .tile-count-badge {
   position: absolute;
@@ -602,6 +730,11 @@ body::before {
 .suit-row .mj-tile.sm {
   width: 100%;
   height: 100%;
+  /* 让条子/筒子的圆点、竹节随列宽缩放 */
+  --dot: clamp(6px, 20cqw, 12px);
+  --bw: clamp(3px, 11cqw, 7px);
+  --bh: clamp(9px, 32cqw, 20px);
+  --pgap: clamp(1.5px, 6cqw, 4px);
 }
 
 .suit-row .mj-tile.sm .tile-num {
