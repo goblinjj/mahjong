@@ -10,62 +10,12 @@
  *   31:中(百搭)  32:发  33:白
  */
 
+import { pipFaceSVG } from './tile-art.js';
+
 const NUM_CHARS = ['一', '二', '三', '四', '五', '六', '七', '八', '九'];
 const HONOR_CHARS = ['东', '南', '西', '北', '中', '发', '白'];
 const SUIT_CHARS = ['万', '条', '筒'];
 const SUIT_LABELS = ['万子', '条子', '筒子', '字牌'];
-
-/**
- * 各点数的排布（每个元素代表一"行"，数字表示该行圆点/竹节的个数）。
- * 传统麻将的点数队形，用于 CSS 绘制真实牌面。
- */
-const TONG_ROWS = {
-  1: [1], 2: [1, 1], 3: [1, 1, 1], 4: [2, 2], 5: [2, 1, 2],
-  6: [2, 2, 2], 7: [3, 2, 2], 8: [2, 2, 2, 2], 9: [3, 3, 3],
-};
-const TIAO_ROWS = {
-  1: [1], 2: [2], 3: [1, 2], 4: [2, 2], 5: [2, 1, 2],
-  6: [3, 3], 7: [1, 3, 3], 8: [2, 2, 2, 2], 9: [3, 3, 3],
-};
-
-/**
- * 判断某个竹节是否应为红色（传统上 1条为红鸟、5条中间、7条顶部为红）
- */
-function isRedTiao(n, rowIdx) {
-  if (n === 1) return true;         // 一条（红鸟）
-  if (n === 5 && rowIdx === 1) return true; // 五条中间
-  if (n === 7 && rowIdx === 0) return true; // 七条顶部
-  return false;
-}
-
-/**
- * 用 CSS 元素绘制条子/筒子牌面
- * @param {'tiao'|'tong'} kind
- * @param {number} n - 点数 1-9
- * @returns {HTMLElement}
- */
-function buildPips(kind, n) {
-  const wrap = document.createElement('div');
-  wrap.className = `tile-pips ${kind}-pips`;
-  wrap.dataset.n = String(n);
-
-  const rows = kind === 'tong' ? TONG_ROWS[n] : TIAO_ROWS[n];
-  const diagonal = kind === 'tong' && n === 3; // 三筒斜排
-
-  rows.forEach((count, rowIdx) => {
-    const row = document.createElement('div');
-    row.className = 'pip-row';
-    if (diagonal) row.classList.add(`diag-${rowIdx}`);
-    for (let i = 0; i < count; i++) {
-      const pip = document.createElement('span');
-      pip.className = 'pip';
-      if (kind === 'tiao' && isRedTiao(n, rowIdx)) pip.classList.add('red');
-      row.appendChild(pip);
-    }
-    wrap.appendChild(row);
-  });
-  return wrap;
-}
 
 /**
  * 获取牌的花色 CSS 类名
@@ -115,10 +65,13 @@ export function createTileElement(tileIndex, size = '') {
 
   const { num, suit } = getTileChars(tileIndex);
 
-  // 条子/筒子用 CSS 绘制真实牌面；万子和字牌保留文字
+  // 条子/筒子用 SVG 绘制真实牌面；万子和字牌保留文字
   if (suitClass === 'tiao' || suitClass === 'tong') {
     const n = (tileIndex % 9) + 1;
-    el.appendChild(buildPips(suitClass, n));
+    const face = document.createElement('span');
+    face.className = 'tile-face';
+    face.innerHTML = pipFaceSVG(suitClass, n);
+    el.appendChild(face);
   } else {
     const numSpan = document.createElement('span');
     numSpan.className = 'tile-num';
