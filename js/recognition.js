@@ -30,7 +30,7 @@ export class TileRecognizer {
      *  ?v= 版本号用于绕过浏览器 immutable 缓存。
      *  每次替换模型文件时递增该值，让用户拉取最新模型。
      */
-    this.modelPath = '/assets/model/mahjong_yolov8n.onnx?v=2';
+    this.modelPath = '/assets/model/mahjong_yolov8n.onnx?v=3';
 
     /** 检测置信度阈值 */
     this.confThreshold = 0.5;
