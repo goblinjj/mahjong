@@ -10,11 +10,11 @@
  *   31:中(百搭)  32:发  33:白
  */
 
-import { pipFaceSVG } from './tile-art.js';
+import { pipFaceSVG, baiFaceSVG } from './tile-art.js';
 
 const NUM_CHARS = ['一', '二', '三', '四', '五', '六', '七', '八', '九'];
-const HONOR_CHARS = ['东', '南', '西', '北', '中', '发', '白'];
-const SUIT_CHARS = ['万', '条', '筒'];
+const HONOR_CHARS = ['东', '南', '西', '北', '中', '發', '白'];
+const SUIT_CHARS = ['萬', '条', '筒'];
 const SUIT_LABELS = ['万子', '条子', '筒子', '字牌'];
 
 /**
@@ -65,12 +65,17 @@ export function createTileElement(tileIndex, size = '') {
 
   const { num, suit } = getTileChars(tileIndex);
 
-  // 条子/筒子用 SVG 绘制真实牌面；万子和字牌保留文字
+  // 条子/筒子/白板用 SVG 绘制真实牌面；万子和其余字牌保留文字
   if (suitClass === 'tiao' || suitClass === 'tong') {
     const n = (tileIndex % 9) + 1;
     const face = document.createElement('span');
     face.className = 'tile-face';
     face.innerHTML = pipFaceSVG(suitClass, n);
+    el.appendChild(face);
+  } else if (tileIndex === 33) {
+    const face = document.createElement('span');
+    face.className = 'tile-face';
+    face.innerHTML = baiFaceSVG();
     el.appendChild(face);
   } else {
     const numSpan = document.createElement('span');

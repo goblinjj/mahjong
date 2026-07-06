@@ -50,20 +50,58 @@ function gridPositions(rows) {
 
 const n2 = (x) => Math.round(x * 100) / 100;
 
+// 铜钱配色（用于六筒/九筒的分排配色）
+const COIN_THEMES = {
+  blue: { outer: '#2e7fc0', edge: '#0f4c86', inner: '#1f6aad', innerEdge: '#0f4c86' },
+  green: { outer: '#2ba85a', edge: '#12662f', inner: '#1c8f42', innerEdge: '#0f5a2b' },
+  red: { outer: '#d5495a', edge: '#8a1020', inner: '#c2263a', innerEdge: '#7a0c1c' },
+};
+
+/** 六筒/九筒按排配色：上绿、中红、下蓝；其余牌统一蓝色 */
+function tongTheme(n, rowIdx) {
+  if (n === 6 || n === 9) return ['green', 'red', 'blue'][rowIdx] || 'blue';
+  return 'blue';
+}
+
 /** 一枚铜钱（同心圆环） */
-function coin(cx, cy, r, ornate = false) {
-  const inner = ornate ? '#c41e3a' : '#1f6aad';
-  const innerEdge = ornate ? '#8a0f22' : '#0f4c86';
-  let s = `<circle cx="${n2(cx)}" cy="${n2(cy)}" r="${n2(r)}" fill="#2e7fc0" stroke="#0f4c86" stroke-width="${n2(r * 0.12)}"/>`;
+function coin(cx, cy, r, opts = {}) {
+  const { theme = 'blue', ornate = false } = opts;
+  const t = COIN_THEMES[theme];
+  const inner = ornate ? '#c41e3a' : t.inner;
+  const innerEdge = ornate ? '#8a0f22' : t.innerEdge;
+  let s = `<circle cx="${n2(cx)}" cy="${n2(cy)}" r="${n2(r)}" fill="${t.outer}" stroke="${t.edge}" stroke-width="${n2(r * 0.12)}"/>`;
   s += `<circle cx="${n2(cx)}" cy="${n2(cy)}" r="${n2(r * 0.74)}" fill="#eef5fb"/>`;
   if (ornate) {
-    s += `<circle cx="${n2(cx)}" cy="${n2(cy)}" r="${n2(r * 0.58)}" fill="#2e7fc0"/>`;
+    s += `<circle cx="${n2(cx)}" cy="${n2(cy)}" r="${n2(r * 0.58)}" fill="${t.outer}"/>`;
     s += `<circle cx="${n2(cx)}" cy="${n2(cy)}" r="${n2(r * 0.4)}" fill="#eef5fb"/>`;
   }
   s += `<circle cx="${n2(cx)}" cy="${n2(cy)}" r="${n2(r * (ornate ? 0.26 : 0.5))}" fill="${inner}"/>`;
   s += `<circle cx="${n2(cx)}" cy="${n2(cy)}" r="${n2(r * (ornate ? 0.26 : 0.5))}" fill="none" stroke="${innerEdge}" stroke-width="${n2(r * 0.08)}"/>`;
   // 高光
   s += `<circle cx="${n2(cx - r * 0.3)}" cy="${n2(cy - r * 0.33)}" r="${n2(r * 0.15)}" fill="#ffffff" opacity="0.55"/>`;
+  return s;
+}
+
+/** 七筒：顶部 3 枚从左下至右上斜排，下方 2×2 */
+function sevenTong() {
+  const r = 11.5;
+  const topH = AREA_H * 0.42;
+  const yHi = AREA_T + r + 1;          // 右上
+  const yLo = AREA_T + topH - r + 1;   // 左下
+  const xL = AREA_L + AREA_W * 0.22;
+  const xC = VB_W / 2;
+  const xR = AREA_R - AREA_W * 0.22;
+  let s = '';
+  s += coin(xL, yLo, r);
+  s += coin(xC, (yHi + yLo) / 2, r);
+  s += coin(xR, yHi, r);
+  const bandT = AREA_T + topH;
+  const bandH = AREA_B - bandT;
+  const yb0 = bandT + bandH * 0.28;
+  const yb1 = bandT + bandH * 0.72;
+  const xb0 = AREA_L + AREA_W * 0.28;
+  const xb1 = AREA_R - AREA_W * 0.28;
+  [[xb0, yb0], [xb1, yb0], [xb0, yb1], [xb1, yb1]].forEach(([x, y]) => { s += coin(x, y, r); });
   return s;
 }
 
@@ -110,6 +148,15 @@ function bird() {
   `;
 }
 
+/** 白板：四周两圈蓝色边框，中间留白 */
+export function baiFaceSVG() {
+  const blue = '#1f5c9c';
+  return `<svg class="tile-svg" viewBox="0 0 ${VB_W} ${VB_H}" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" aria-hidden="true">`
+    + `<rect x="16" y="22" width="56" height="76" rx="7" fill="none" stroke="${blue}" stroke-width="3"/>`
+    + `<rect x="23" y="29" width="42" height="62" rx="4.5" fill="none" stroke="${blue}" stroke-width="1.6"/>`
+    + `</svg>`;
+}
+
 /**
  * 生成条子/筒子的 SVG 牌面
  * @param {'tiao'|'tong'} kind
@@ -124,17 +171,19 @@ export function pipFaceSVG(kind, n) {
   } else if (kind === 'tong') {
     const rows = TONG_ROWS[n];
     if (n === 1) {
-      body = coin(VB_W / 2, VB_H / 2, 26, true);
+      body = coin(VB_W / 2, VB_H / 2, 26, { ornate: true });
     } else if (n === 3) {
       // 斜排三筒
       const r = 13;
       body += coin(AREA_L + AREA_W * 0.26, AREA_T + AREA_H * 0.22, r);
       body += coin(VB_W / 2, VB_H / 2, r);
       body += coin(AREA_R - AREA_W * 0.26, AREA_B - AREA_H * 0.22, r);
+    } else if (n === 7) {
+      body = sevenTong();
     } else {
       const pos = gridPositions(rows);
       const r = Math.min(AREA_W / pos[0].maxC, AREA_H / pos[0].rows) / 2 * 0.82;
-      pos.forEach((p) => { body += coin(p.cx, p.cy, r); });
+      pos.forEach((p) => { body += coin(p.cx, p.cy, r, { theme: tongTheme(n, p.rowIdx) }); });
     }
   } else {
     // 条子 2-9
