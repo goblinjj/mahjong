@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>麻将听牌分析器 - 推倒胡 / 红中百搭</title>
+  <meta name="description" content="拍照或手动输入麻将牌，智能分析听牌和最优出牌">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <!-- Header -->
+  <header id="app-header">
+    <h1>🀄 麻将听牌分析器</h1>
+    <p class="subtitle">推倒胡 · 红中百搭</p>
+  </header>
+
+  <main id="app-main">
+    <!-- Input mode toggle -->
+    <div id="input-mode-toggle" class="glass-panel">
+      <button id="btn-manual" class="mode-btn active" aria-pressed="true" aria-label="手动选牌模式">🎯 手动选牌</button>
+      <button id="btn-camera" class="mode-btn" aria-pressed="false" aria-label="拍照识别模式">📷 拍照识别</button>
+    </div>
+
+    <!-- Camera section (hidden by default) -->
+    <section id="camera-section" class="hidden" aria-label="拍照识别区域">
+      <div id="camera-container">
+        <video id="camera-video" autoplay playsinline aria-label="摄像头预览"></video>
+        <canvas id="camera-canvas" aria-hidden="true"></canvas>
+      </div>
+      <div id="camera-controls">
+        <button id="btn-capture" class="action-btn" aria-label="拍照识别">📸 拍照</button>
+        <button id="btn-upload" class="action-btn secondary" aria-label="从相册选择图片">
+          📁 从相册选择
+          <input type="file" id="file-input" accept="image/*" hidden aria-label="选择图片文件">
+        </button>
+      </div>
+      <div id="recognition-status" class="hidden" aria-live="polite">
+        <div class="spinner" aria-hidden="true"></div>
+        <span>识别中...</span>
+      </div>
+    </section>
+
+    <!-- Manual tile selector section -->
+    <section id="selector-section" aria-label="手动选牌区域">
+      <div id="tile-selector" class="glass-panel"></div>
+    </section>
+
+    <!-- Current hand display -->
+    <section id="hand-section" class="glass-panel" aria-label="当前手牌">
+      <div class="section-header">
+        <h2>你的手牌</h2>
+        <span id="hand-count" class="badge" aria-live="polite">0/14</span>
+      </div>
+      <div id="hand-tiles" class="tile-row" role="list" aria-label="已选择的手牌"></div>
+      <div id="hand-actions">
+        <button id="btn-clear" class="action-btn danger" disabled aria-label="清空手牌">清空</button>
+        <button id="btn-analyze" class="action-btn primary" disabled aria-label="分析听牌">🔍 分析听牌</button>
+      </div>
+    </section>
+
+    <!-- Analysis results -->
+    <section id="result-section" class="glass-panel hidden" aria-label="分析结果" aria-live="polite">
+      <div class="section-header">
+        <h2 id="result-title">分析结果</h2>
+      </div>
+      <div id="result-content"></div>
+    </section>
+  </main>
+
+  <footer id="app-footer">
+    <p>本地运算 · 数据不离开你的设备</p>
+  </footer>
+
+  <script type="module" src="/js/app.js"></script>
+</body>
+</html>
