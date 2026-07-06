@@ -13,7 +13,7 @@
 import { pipFaceSVG, baiFaceSVG } from './tile-art.js';
 
 const NUM_CHARS = ['一', '二', '三', '四', '五', '六', '七', '八', '九'];
-const HONOR_CHARS = ['东', '南', '西', '北', '中', '發', '白'];
+const HONOR_CHARS = ['東', '南', '西', '北', '中', '發', '白'];
 const SUIT_CHARS = ['萬', '条', '筒'];
 const SUIT_LABELS = ['万子', '条子', '筒子', '字牌'];
 

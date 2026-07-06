@@ -404,7 +404,10 @@ body::before {
 }
 
 /* Suit colors */
-.mj-tile.wan .tile-num,
+.mj-tile.wan .tile-num {
+  color: #1a1a1a;
+}
+
 .mj-tile.wan .tile-suit {
   color: var(--suit-wan);
 }
