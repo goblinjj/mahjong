@@ -218,13 +218,7 @@ export class TileSelector {
 
         const tile = createTileElement(i, 'sm');
         tile.setAttribute('aria-label', `添加 ${getTileLabel(i)}`);
-
-        // 剩余数量标记
-        const countBadge = document.createElement('span');
-        countBadge.className = 'tile-count-badge';
-        countBadge.textContent = '×4';
         wrapper.appendChild(tile);
-        wrapper.appendChild(countBadge);
 
         // 点击事件
         const handler = () => this.addTile(i);
@@ -236,7 +230,7 @@ export class TileSelector {
           }
         });
 
-        this.selectorTiles.set(i, { wrapper, tile, countBadge });
+        this.selectorTiles.set(i, { wrapper, tile });
         row.appendChild(wrapper);
       }
       grid.appendChild(row);
@@ -264,13 +258,10 @@ export class TileSelector {
       const used = i === 31 ? this.wildCount : this.tiles[i];
       const remaining = 4 - used;
 
-      entry.countBadge.textContent = `×${remaining}`;
-
+      // 只保留"用尽变灰"的状态,不再展示数量角标
       if (remaining <= 0) {
-        entry.countBadge.classList.add('empty');
         entry.tile.classList.add('exhausted');
       } else {
-        entry.countBadge.classList.remove('empty');
         entry.tile.classList.remove('exhausted');
       }
     }
