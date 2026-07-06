@@ -16,6 +16,8 @@
     // 将 wasm 二进制文件也指到同一 CDN，避免相对路径 404
     if (window.ort && ort.env && ort.env.wasm) {
       ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.19.2/dist/';
+      // 单线程 WASM: 不需要 SharedArrayBuffer / COOP/COEP，兼容性最好
+      ort.env.wasm.numThreads = 1;
     }
   </script>
 </head>
@@ -42,26 +44,13 @@
       </div>
 
       <div id="camera-container">
-        <video id="camera-video" autoplay playsinline aria-label="摄像头预览"></video>
+        <video id="camera-video" autoplay playsinline muted aria-label="摄像头预览"></video>
         <canvas id="camera-canvas" aria-hidden="true"></canvas>
+        <canvas id="camera-overlay" aria-hidden="true"></canvas>
+        <div id="live-count-badge" aria-live="polite">初始化中…</div>
       </div>
       <div id="camera-controls">
-        <button id="btn-capture" class="action-btn" aria-label="拍照识别">📸 拍照</button>
-        <button id="btn-upload" class="action-btn secondary" aria-label="从相册选择图片">
-          📁 从相册选择
-          <input type="file" id="file-input" accept="image/*" hidden aria-label="选择图片文件">
-        </button>
-      </div>
-      <div id="camera-controls-2">
-        <button id="btn-load-model" class="action-btn secondary" aria-label="加载本地 ONNX 模型">
-          📦 加载 ONNX 模型
-          <input type="file" id="model-file-input" accept=".onnx" hidden aria-label="选择 ONNX 模型文件">
-        </button>
-        <button id="btn-demo" class="action-btn secondary" aria-label="演示识别流程">🎮 演示识别</button>
-      </div>
-      <div id="recognition-status" class="hidden" aria-live="polite">
-        <div class="spinner" aria-hidden="true"></div>
-        <span>识别中...</span>
+        <button id="btn-confirm" class="action-btn primary" disabled aria-label="确认识别结果">✔ 确认识别结果</button>
       </div>
 
       <!-- 识别结果预览与修正 -->

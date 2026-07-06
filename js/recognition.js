@@ -2,10 +2,8 @@
  * recognition.js - ONNX Runtime Web 推理管线
  *
  * YOLOv8 麻将牌检测模型的预处理、推理、后处理管线。
- * 支持三种模型来源：
- *   1. 默认路径 /assets/model/mahjong_yolov8n.onnx
- *   2. 用户通过 <input type="file"> 上传的 ArrayBuffer
- *   3. 演示模式（无模型时使用示例牌型演示流程）
+ * 模型从默认路径 /assets/model/mahjong_yolov8n.onnx 自动加载；
+ * 无模型时前端可走 buildDemoDetections 演示流程。
  */
 
 /**
@@ -28,13 +26,16 @@ export class TileRecognizer {
     this.status = ModelStatus.UNLOADED;
     /** @type {string} 最近一次错误信息 */
     this.lastError = '';
-    /** @type {string} 默认模型文件路径（相对于站点根） */
-    this.modelPath = '/assets/model/mahjong_yolov8n.onnx';
+    /** @type {string} 默认模型文件路径（相对于站点根）
+     *  ?v= 版本号用于绕过浏览器 immutable 缓存。
+     *  每次替换模型文件时递增该值，让用户拉取最新模型。
+     */
+    this.modelPath = '/assets/model/mahjong_yolov8n.onnx?v=2';
 
     /** 检测置信度阈值 */
-    this.confThreshold = 0.45;
-    /** NMS IoU 阈值 */
-    this.iouThreshold = 0.5;
+    this.confThreshold = 0.5;
+    /** NMS IoU 阈值 (麻将牌通常紧贴不重叠，用较低阈值抑制重复框) */
+    this.iouThreshold = 0.35;
     /** 模型输入尺寸 */
     this.inputSize = 640;
 
@@ -47,6 +48,58 @@ export class TileRecognizer {
       '1tiao', '2tiao', '3tiao', '4tiao', '5tiao', '6tiao', '7tiao', '8tiao', '9tiao',
       '1tong', '2tong', '3tong', '4tong', '5tong', '6tong', '7tong', '8tong', '9tong',
       'dong', 'nan', 'xi', 'bei', 'zhong', 'fa', 'bai',
+    ];
+
+    /**
+     * Roboflow mahjong-baq4s (42 类) → 项目 34 类 索引映射。
+     * 索引即 Roboflow 类顺序(按字母序):
+     *   1B~9B=条, 1C~9C=万, 1D~9D=筒, 1F~4F=花, 1S~4S=季,
+     *   EW=东, SW=南, WW=西, NW=北, RD=中, GD=发, WD=白
+     * 花牌/季牌(1F-4F, 1S-4S)本项目不支持 → 映射为 null,推理时丢弃。
+     */
+    this.roboflow42to34 = [
+      9,    // 0  1B  → 1tiao
+      0,    // 1  1C  → 1wan
+      18,   // 2  1D  → 1tong
+      null, // 3  1F
+      null, // 4  1S
+      10,   // 5  2B  → 2tiao
+      1,    // 6  2C  → 2wan
+      19,   // 7  2D  → 2tong
+      null, // 8  2F
+      null, // 9  2S
+      11,   // 10 3B
+      2,    // 11 3C
+      20,   // 12 3D
+      null, // 13 3F
+      null, // 14 3S
+      12,   // 15 4B
+      3,    // 16 4C
+      21,   // 17 4D
+      null, // 18 4F
+      null, // 19 4S
+      13,   // 20 5B
+      4,    // 21 5C
+      22,   // 22 5D
+      14,   // 23 6B
+      5,    // 24 6C
+      23,   // 25 6D
+      15,   // 26 7B
+      6,    // 27 7C
+      24,   // 28 7D
+      16,   // 29 8B
+      7,    // 30 8C
+      25,   // 31 8D
+      17,   // 32 9B
+      8,    // 33 9C
+      26,   // 34 9D
+      27,   // 35 EW → dong
+      32,   // 36 GD → fa
+      30,   // 37 NW → bei
+      31,   // 38 RD → zhong
+      28,   // 39 SW → nan
+      33,   // 40 WD → bai
+      29,   // 41 WW → xi
     ];
   }
 
@@ -76,14 +129,22 @@ export class TileRecognizer {
       const resp = await fetch(this.modelPath, { method: 'HEAD' });
       if (!resp.ok) {
         this.status = ModelStatus.MISSING;
-        this.lastError = `未找到模型文件：${this.modelPath}（请训练后放入该路径，或点【加载 ONNX 模型】上传）`;
+        this.lastError = `未找到模型文件：${this.modelPath}（请训练后放入该路径）`;
         console.info(this.lastError);
         return false;
       }
 
-      this.session = await ort.InferenceSession.create(this.modelPath, {
-        executionProviders: ['webgpu', 'wasm'],
+      console.log('[recognizer] 开始下载并初始化 ONNX 会话...');
+      // 只用 WASM: WebGPU 在部分浏览器/环境下会静默挂起，兼容性优先
+      const sessionPromise = ort.InferenceSession.create(this.modelPath, {
+        executionProviders: ['wasm'],
+        graphOptimizationLevel: 'all',
       });
+      // 60 秒超时保护，防止无限挂起
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('模型初始化超时 (>60s)')), 60000)
+      );
+      this.session = await Promise.race([sessionPromise, timeoutPromise]);
       this.status = ModelStatus.READY;
       console.log('✅ 模型加载成功');
       return true;
@@ -91,34 +152,6 @@ export class TileRecognizer {
       this.status = ModelStatus.ERROR;
       this.lastError = err.message || String(err);
       console.warn('模型加载失败:', err);
-      return false;
-    }
-  }
-
-  /**
-   * 从用户选择的 File 对象加载模型（不需要模型放在服务器上）
-   * @param {File} file - 用户选择的 .onnx 文件
-   * @returns {Promise<boolean>}
-   */
-  async loadModelFromFile(file) {
-    if (typeof ort === 'undefined') {
-      this.status = ModelStatus.ORT_MISSING;
-      this.lastError = 'ONNX Runtime Web 未加载';
-      return false;
-    }
-    this.status = ModelStatus.LOADING;
-    try {
-      const buffer = await file.arrayBuffer();
-      this.session = await ort.InferenceSession.create(new Uint8Array(buffer), {
-        executionProviders: ['webgpu', 'wasm'],
-      });
-      this.status = ModelStatus.READY;
-      console.log(`✅ 从本地文件加载模型成功：${file.name}`);
-      return true;
-    } catch (err) {
-      this.status = ModelStatus.ERROR;
-      this.lastError = err.message || String(err);
-      console.warn('从文件加载模型失败:', err);
       return false;
     }
   }
@@ -159,7 +192,7 @@ export class TileRecognizer {
       case ModelStatus.ORT_MISSING:
         return 'ONNX Runtime Web 未能加载：请检查网络（脚本从 jsdelivr CDN 引入），或改用离线部署。';
       case ModelStatus.MISSING:
-        return '尚未提供模型文件。请点击【加载 ONNX 模型】上传本地 .onnx，或将文件放入 assets/model/mahjong_yolov8n.onnx。';
+        return '尚未提供模型文件。请将训练好的 .onnx 文件放入 assets/model/mahjong_yolov8n.onnx。';
       case ModelStatus.ERROR:
         return `模型加载失败：${this.lastError}`;
       case ModelStatus.LOADING:
@@ -245,8 +278,12 @@ export class TileRecognizer {
     const outputData = output.data;
     const dims = output.dims;
 
-    const numClasses = this.classNames.length;
+    // 从模型输出反推实际类别数(可能是 34 或 42)
+    const numModelClasses = dims[1] - 4;
     const numAnchors = dims[2];
+
+    // 42 类模型 → 应用 Roboflow 映射;34 类模型 → 直接使用
+    const remap = numModelClasses === 42 ? this.roboflow42to34 : null;
 
     const scale = this._lastScale || 1;
     const padX = this._lastPadX || 0;
@@ -263,16 +300,20 @@ export class TileRecognizer {
       const bh = outputData[3 * numAnchors + a];
 
       let maxScore = -Infinity;
-      let maxClassId = -1;
-      for (let c = 0; c < numClasses; c++) {
+      let maxModelId = -1;
+      for (let c = 0; c < numModelClasses; c++) {
         const score = outputData[(4 + c) * numAnchors + a];
         if (score > maxScore) {
           maxScore = score;
-          maxClassId = c;
+          maxModelId = c;
         }
       }
 
       if (maxScore < this.confThreshold) continue;
+
+      // 映射到项目 34 类;若为花/季牌等未支持类 → 丢弃该检测
+      const projectId = remap ? remap[maxModelId] : maxModelId;
+      if (projectId == null) continue;
 
       const x = (cx - bw / 2 - padX) / scale;
       const y = (cy - bh / 2 - padY) / scale;
@@ -281,7 +322,7 @@ export class TileRecognizer {
 
       boxes.push({ x, y, w, h });
       scores.push(maxScore);
-      classIds.push(maxClassId);
+      classIds.push(projectId);
     }
 
     const keepIndices = this.nms(boxes, scores, this.iouThreshold);
@@ -301,25 +342,28 @@ export class TileRecognizer {
 
   /**
    * Non-Maximum Suppression (NMS)
+   *
+   * 按置信度从高到低排序，保留最高分框，抑制与其 IoU 超阈值的所有低分框。
    */
   nms(boxes, scores, iouThreshold = 0.5) {
     if (boxes.length === 0) return [];
 
-    const indices = Array.from({ length: boxes.length }, (_, i) => i);
-    indices.sort((a, b) => scores[b] - scores[a]);
+    const order = Array.from({ length: boxes.length }, (_, i) => i);
+    order.sort((a, b) => scores[b] - scores[a]);
 
     const keep = [];
-    const suppressed = new Set();
+    const suppressed = new Uint8Array(boxes.length);
 
-    for (const i of indices) {
-      if (suppressed.has(i)) continue;
+    for (let p = 0; p < order.length; p++) {
+      const i = order[p];
+      if (suppressed[i]) continue;
       keep.push(i);
 
-      for (const j of indices) {
-        if (j <= i || suppressed.has(j)) continue;
-        const iou = this.computeIoU(boxes[i], boxes[j]);
-        if (iou > iouThreshold) {
-          suppressed.add(j);
+      for (let q = p + 1; q < order.length; q++) {
+        const j = order[q];
+        if (suppressed[j]) continue;
+        if (this.computeIoU(boxes[i], boxes[j]) > iouThreshold) {
+          suppressed[j] = 1;
         }
       }
     }

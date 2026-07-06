@@ -97,16 +97,26 @@ export function getTotalTiles(tiles, wildCount) {
 /**
  * 判断手牌是否胡牌
  *
- * 检查两种胡牌形式:
- *   1. 标准胡: 4组面子(顺子/刻子) + 1个雀头(对子)
- *   2. 七对子: 7组对子
+ * 支持任意合法手牌数量(2, 5, 8, 11, 14):
+ *   - 14 张 = 4 面子 + 雀头(无副露)
+ *   - 11 张 = 3 面子 + 雀头(已副露 1 组)
+ *   - 8 张  = 2 面子 + 雀头(已副露 2 组)
+ *   - 5 张  = 1 面子 + 雀头(已副露 3 组)
+ *   - 2 张  = 仅雀头(已副露 4 组)
+ *
+ * 七对子只在 14 张(全暗手)时适用,副露过就不能走七对子路径。
  *
  * @param {Uint8Array} tiles - 牌数组(不含百搭，tiles[WILD_TILE]必须为0)
  * @param {number} wildCount - 百搭牌数量
  * @returns {boolean} 是否胡牌
  */
 export function isWinningHand(tiles, wildCount) {
-  return checkStandardWin(tiles, wildCount) || checkSevenPairs(tiles, wildCount);
+  const total = getTotalTiles(tiles, wildCount);
+  if (total < 2 || (total - 2) % 3 !== 0) return false;
+  const meldsNeeded = (total - 2) / 3;
+  if (checkStandardWin(tiles, wildCount, meldsNeeded)) return true;
+  if (total === 14 && checkSevenPairs(tiles, wildCount)) return true;
+  return false;
 }
 
 /**
@@ -121,15 +131,16 @@ export function isWinningHand(tiles, wildCount) {
  *
  * @param {Uint8Array} tiles - 牌数组(原地修改后会还原)
  * @param {number} wildCount - 百搭数量
+ * @param {number} meldsNeeded - 需要凑齐的面子数量(0-4,取决于副露数量)
  * @returns {boolean}
  */
-function checkStandardWin(tiles, wildCount) {
+function checkStandardWin(tiles, wildCount, meldsNeeded) {
   // 枚举每种牌作为雀头
   for (let p = 0; p < TILE_COUNT; p++) {
     // 情况A: 雀头由2张实牌组成
     if (tiles[p] >= 2) {
       tiles[p] -= 2;
-      if (canFormMelds(tiles, wildCount, 4)) {
+      if (canFormMelds(tiles, wildCount, meldsNeeded)) {
         tiles[p] += 2;
         return true;
       }
@@ -139,7 +150,7 @@ function checkStandardWin(tiles, wildCount) {
     // 情况B: 雀头由1张实牌 + 1张百搭组成
     if (tiles[p] >= 1 && wildCount >= 1) {
       tiles[p] -= 1;
-      if (canFormMelds(tiles, wildCount - 1, 4)) {
+      if (canFormMelds(tiles, wildCount - 1, meldsNeeded)) {
         tiles[p] += 1;
         return true;
       }
@@ -149,7 +160,7 @@ function checkStandardWin(tiles, wildCount) {
 
   // 情况C: 雀头由2张百搭组成(不对应任何特定牌型)
   if (wildCount >= 2) {
-    if (canFormMelds(tiles, wildCount - 2, 4)) {
+    if (canFormMelds(tiles, wildCount - 2, meldsNeeded)) {
       return true;
     }
   }
@@ -321,53 +332,209 @@ function checkSevenPairs(tiles, wildCount) {
 /**
  * 计算听牌(听哪些牌可以胡)
  *
- * 给定13张手牌(不含百搭) + wildCount张百搭，
- * 逐一尝试加入每种牌，检查是否能组成胡牌。
+ * 支持任意合法待摸状态手牌数量(1, 4, 7, 10, 13),即 3k+1。
+ * 逐一尝试加入每种普通牌,检查是否能组成胡牌(3k+2 状态)。
  *
- * @param {Uint8Array} tiles13 - 13张手牌数组(不含百搭)
+ * 红中(WILD_TILE)是百搭牌,不作为"可胡的目标牌"参与展示。
+ * 不返回牌山剩余数量(牌桌真实剩余无法知晓)。
+ *
+ * @param {Uint8Array} tiles - 手牌数组(不含百搭),牌总数应为 3k+1
  * @param {number} wildCount - 百搭数量
- * @returns {Array<{tileIndex: number, count: number}>} 听牌列表
- *   tileIndex: 能胡的牌索引
- *   count: 该牌在牌山中的剩余数量
+ * @returns {number[]} 能胡的牌索引数组
  */
-export function getTenpaiTiles(tiles13, wildCount) {
+export function getTenpaiTiles(tiles, wildCount) {
+  const total = getTotalTiles(tiles, wildCount);
+  if (total < 1 || (total - 1) % 3 !== 0) return [];
+
   const results = [];
 
   for (let i = 0; i < TILE_COUNT; i++) {
-    if (i === WILD_TILE) {
-      // 摸到百搭牌: 百搭数+1，检查14张牌能否胡
-      if (canWinWith14(tiles13, wildCount + 1)) {
-        const remaining = 4 - wildCount; // 牌山中剩余的百搭数
-        if (remaining > 0) {
-          results.push({ tileIndex: i, count: remaining });
-        }
-      }
-    } else {
-      // 摸到普通牌: 对应牌数+1，检查14张牌能否胡
-      if (tiles13[i] < 4) { // 不可能摸到第5张
-        tiles13[i] += 1;
-        if (isWinningHand(tiles13, wildCount)) {
-          const remaining = 4 - tiles13[i]; // 牌山中剩余数量(已包含刚加的那张)
-          if (remaining > 0) {
-            results.push({ tileIndex: i, count: remaining });
-          }
-        }
-        tiles13[i] -= 1;
-      }
+    if (i === WILD_TILE) continue;   // 红中不作为可胡目标
+    if (tiles[i] >= 4) continue;     // 该种牌已经全部在手,不可能再摸到
+
+    tiles[i] += 1;
+    if (isWinningHand(tiles, wildCount)) {
+      results.push(i);
     }
+    tiles[i] -= 1;
   }
 
   return results;
 }
 
+// ============================================================
+// 向听数分析 (Shanten Analysis)
+// ============================================================
+//
+// 向听数 (shanten): 距离听牌还差几张有效牌。
+//   shanten=0 —— 已听牌
+//   shanten=1 —— 一向听, 再摸一张有效牌 + 打一张后可进入听牌
+//   shanten=2 —— 二向听, 需要两次有效摸-打调整
+//
+// 本模块采用"迭代加深"实现,上限 maxDepth=2:
+//   - 递归结构简单,与百搭规则同一套 isWinningHand 兼容
+//   - shanten > 2 时代价指数级上升,超过范围直接返回 maxDepth+1
+//
+// 性能: 二向听递归的最底层调用 isTenpaiFast 数百万次, 且同一 3k+1 手
+// 状态会被多条路径重复访问。使用简易记忆化(下方 _tenpaiCache) 后
+// 一次 14 张手牌的二向听分析从 15s 级降至 1s 级。缓存应在每次
+// analyzeHand 顶层调用前用 resetShantenCache() 清空。
+
+/** isTenpaiFast 结果缓存, key = tiles.join(',') + '|' + wildCount */
+let _tenpaiCache = new Map();
+
+/** 清空向听数分析的记忆化缓存。analyzeHand 会在入口处调用一次。 */
+export function resetShantenCache() {
+  _tenpaiCache = new Map();
+}
+
 /**
- * 辅助函数: 检查摸到百搭后能否胡牌
- * 摸百搭不改变 tiles 数组，只增加 wildCount
- *
- * @param {Uint8Array} tiles - 牌数组
- * @param {number} newWildCount - 增加后的百搭数量
- * @returns {boolean}
+ * 3k+1 手牌是否听牌 —— 加了短路 + 记忆化的快速版本(不列出全部听牌)
+ * 与 getTenpaiTiles(...).length > 0 等价,但找到第一张就返回
  */
-function canWinWith14(tiles, newWildCount) {
-  return isWinningHand(tiles, newWildCount);
+function isTenpaiFast(tiles, wildCount) {
+  const key = tiles.join(',') + '|' + wildCount;
+  const cached = _tenpaiCache.get(key);
+  if (cached !== undefined) return cached;
+
+  let result = false;
+  for (let t = 0; t < TILE_COUNT; t++) {
+    if (t === WILD_TILE) continue;
+    if (tiles[t] >= 4) continue;
+    tiles[t]++;
+    if (isWinningHand(tiles, wildCount)) {
+      tiles[t]--;
+      result = true;
+      break;
+    }
+    tiles[t]--;
+  }
+
+  _tenpaiCache.set(key, result);
+  return result;
+}
+
+/**
+ * 3k+2 手牌是否存在"打出某张后可听牌"的选择
+ */
+function canDiscardToTenpai(tiles, wildCount) {
+  for (let d = 0; d < TILE_COUNT; d++) {
+    if (d === WILD_TILE) continue;
+    if (tiles[d] === 0) continue;
+    tiles[d]--;
+    const ok = isTenpaiFast(tiles, wildCount);
+    tiles[d]++;
+    if (ok) return true;
+  }
+  if (wildCount > 0 && isTenpaiFast(tiles, wildCount - 1)) return true;
+  return false;
+}
+
+/**
+ * 3k+1 手牌是否可在"摸1张 + 打1张"一次调整内进入听牌
+ * 即向听数 ≤ 1
+ */
+function canReachTenpaiInOneCycle(tiles, wildCount) {
+  if (isTenpaiFast(tiles, wildCount)) return true;
+  for (let t = 0; t < TILE_COUNT; t++) {
+    if (t === WILD_TILE) continue;
+    if (tiles[t] >= 4) continue;
+    tiles[t]++;
+    const ok = canDiscardToTenpai(tiles, wildCount);
+    tiles[t]--;
+    if (ok) return true;
+  }
+  if (wildCount < 4 && canDiscardToTenpai(tiles, wildCount + 1)) return true;
+  return false;
+}
+
+/**
+ * 3k+2 手牌是否存在"打出某张后向听数 ≤ 1"的选择
+ */
+function canDiscardToShanten1(tiles, wildCount) {
+  for (let d = 0; d < TILE_COUNT; d++) {
+    if (d === WILD_TILE) continue;
+    if (tiles[d] === 0) continue;
+    tiles[d]--;
+    const ok = canReachTenpaiInOneCycle(tiles, wildCount);
+    tiles[d]++;
+    if (ok) return true;
+  }
+  if (wildCount > 0 && canReachTenpaiInOneCycle(tiles, wildCount - 1)) return true;
+  return false;
+}
+
+/**
+ * 计算 3k+1 手牌的向听数
+ *
+ * 迭代加深: 先检查是否听牌(0), 再检查一向听(1), 再检查二向听(2)。
+ * 若超过 maxDepth 未确定,返回 maxDepth+1 表示"较远"。
+ *
+ * @param {Uint8Array} tiles - 3k+1 手牌
+ * @param {number} wildCount - 百搭数量
+ * @param {number} maxDepth - 检查的最大向听数(默认2)
+ * @returns {number} 向听数, 或 maxDepth+1 表示超过范围
+ */
+export function getShanten(tiles, wildCount, maxDepth = 2) {
+  if (isTenpaiFast(tiles, wildCount)) return 0;
+  if (maxDepth < 1) return 1;
+
+  // shanten 1: 摸1张 t 后,存在打出令手牌听牌
+  for (let t = 0; t < TILE_COUNT; t++) {
+    if (t === WILD_TILE) continue;
+    if (tiles[t] >= 4) continue;
+    tiles[t]++;
+    const ok = canDiscardToTenpai(tiles, wildCount);
+    tiles[t]--;
+    if (ok) return 1;
+  }
+  if (wildCount < 4 && canDiscardToTenpai(tiles, wildCount + 1)) return 1;
+
+  if (maxDepth < 2) return 2;
+
+  // shanten 2: 摸1张 t 后,存在打出令向听数 ≤ 1
+  for (let t = 0; t < TILE_COUNT; t++) {
+    if (t === WILD_TILE) continue;
+    if (tiles[t] >= 4) continue;
+    tiles[t]++;
+    const ok = canDiscardToShanten1(tiles, wildCount);
+    tiles[t]--;
+    if (ok) return 2;
+  }
+  if (wildCount < 4 && canDiscardToShanten1(tiles, wildCount + 1)) return 2;
+
+  return 3;
+}
+
+/**
+ * 计算 3k+1 手牌在已知向听数下的有效进张
+ *
+ * 有效进张 (ukeire) = 摸到后能让向听数下降 1 的牌种。
+ *   shanten=0 时,即"可胡的牌" = getTenpaiTiles
+ *   shanten=1 时,摸到后手牌变 3k+2,存在打出令其听牌
+ *   shanten=2 时,摸到后手牌变 3k+2,存在打出令其向听数 ≤ 1
+ *
+ * 红中(百搭)始终不作为进张目标返回。
+ *
+ * @param {Uint8Array} tiles - 3k+1 手牌
+ * @param {number} wildCount - 百搭数量
+ * @param {number} shanten - 已知向听数(0/1/2)
+ * @returns {number[]} 有效进张的牌索引数组
+ */
+export function getUkeire(tiles, wildCount, shanten) {
+  if (shanten === 0) return getTenpaiTiles(tiles, wildCount);
+  if (shanten !== 1 && shanten !== 2) return [];
+
+  const ukeire = [];
+  for (let t = 0; t < TILE_COUNT; t++) {
+    if (t === WILD_TILE) continue;
+    if (tiles[t] >= 4) continue;
+    tiles[t]++;
+    const useful = shanten === 1
+      ? canDiscardToTenpai(tiles, wildCount)
+      : canDiscardToShanten1(tiles, wildCount);
+    tiles[t]--;
+    if (useful) ukeire.push(t);
+  }
+  return ukeire;
 }

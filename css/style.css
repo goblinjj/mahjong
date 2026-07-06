@@ -583,6 +583,42 @@ body::before {
   justify-content: center;
 }
 
+/* 花色行: 9 列等宽,永不换行;字牌行 7 张也按 9 列间距(左对齐留白) */
+.suit-row {
+  display: grid;
+  grid-template-columns: repeat(9, minmax(0, 1fr));
+  gap: 4px;
+  width: 100%;
+}
+
+.suit-row .tile-wrapper {
+  position: relative;
+  aspect-ratio: 3 / 4;
+  container-type: inline-size;
+  min-width: 0;
+}
+
+/* 覆盖 .mj-tile.sm 的固定宽高,让牌随列宽自适应 */
+.suit-row .mj-tile.sm {
+  width: 100%;
+  height: 100%;
+}
+
+.suit-row .mj-tile.sm .tile-num {
+  font-size: clamp(11px, 45cqw, 17px);
+}
+
+.suit-row .mj-tile.sm .tile-suit {
+  font-size: clamp(8px, 22cqw, 10px);
+}
+
+.suit-row .mj-tile.sm.feng .tile-num,
+.suit-row .mj-tile.sm.zhong .tile-num,
+.suit-row .mj-tile.sm.fa .tile-num,
+.suit-row .mj-tile.sm.bai .tile-num {
+  font-size: clamp(12px, 50cqw, 19px);
+}
+
 /* Suit section label */
 .suit-label {
   width: 100%;
@@ -633,30 +669,79 @@ body::before {
   position: relative;
   width: 100%;
   aspect-ratio: 4 / 3;
+  max-height: 72vh;
   background: #000;
   border-radius: var(--radius-md);
   overflow: hidden;
-  margin-bottom: 12px;
+  margin: 0 auto 12px;
 }
 
 #camera-video {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  display: block;
 }
 
 #camera-canvas {
   display: none;
 }
 
-/* Camera guide overlay */
+/* 实时识别叠加层:铺满视频区域,与视频左上角对齐 */
+#camera-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 3;
+}
+
+/* 拍摄框虚线引导:横向占满 · 纵向仅容一张牌高度 */
 #camera-container::after {
   content: '';
   position: absolute;
-  inset: 15%;
-  border: 2px dashed rgba(0, 212, 170, 0.4);
-  border-radius: var(--radius-sm);
+  inset: 35% 0;
+  border-top: 2px dashed rgba(0, 212, 170, 0.5);
+  border-bottom: 2px dashed rgba(0, 212, 170, 0.5);
   pointer-events: none;
+  z-index: 2;
+}
+
+/* 虚线之外区域轻微变暗,提示只识别条带内内容 */
+#camera-container::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(to bottom,
+      rgba(0, 0, 0, 0.45) 0,
+      rgba(0, 0, 0, 0.45) 35%,
+      transparent 35%,
+      transparent 65%,
+      rgba(0, 0, 0, 0.45) 65%,
+      rgba(0, 0, 0, 0.45) 100%);
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* 实时识别数量提示 */
+#live-count-badge {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+  color: var(--accent-jade);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  border: 1px solid rgba(0, 212, 170, 0.35);
+  pointer-events: none;
+  z-index: 4;
 }
 
 #camera-controls {
@@ -667,24 +752,6 @@ body::before {
 
 #camera-controls .action-btn {
   flex: 1;
-}
-
-#btn-capture {
-  background: linear-gradient(135deg, #00c49a 0%, #00a87a 100%);
-  color: #fff;
-  box-shadow: 0 4px 15px rgba(0, 196, 154, 0.3);
-}
-
-#recognition-status {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  padding: 12px;
-  background: var(--glass-bg);
-  border-radius: var(--radius-md);
-  color: var(--text-secondary);
-  font-size: 0.85rem;
 }
 
 /* ---- Model status banner ---- */
@@ -722,18 +789,6 @@ body::before {
 .model-status-icon {
   font-size: 1rem;
   flex-shrink: 0;
-}
-
-/* ---- 拍照第二排控件 ---- */
-#camera-controls-2 {
-  display: flex;
-  gap: 10px;
-  margin-bottom: 12px;
-}
-
-#camera-controls-2 .action-btn {
-  flex: 1;
-  font-size: 0.85rem;
 }
 
 /* ---- 识别结果预览 ---- */
@@ -1072,6 +1127,28 @@ body::before {
   .mj-tile.sm.fa .tile-num,
   .mj-tile.sm.bai .tile-num {
     font-size: 16px;
+  }
+}
+
+/* 手机横屏: 让相机区可以占据更宽的空间(手机竖屏 max-width 保持不变) */
+@media (orientation: landscape) and (max-height: 500px) {
+  :root {
+    --max-width: 92vw;
+  }
+
+  #app-header {
+    padding: 8px 16px 6px;
+  }
+  #app-header h1 {
+    font-size: 1.15rem;
+  }
+  #app-header .subtitle {
+    display: none;
+  }
+
+  #camera-container {
+    max-height: 78vh;
+    max-width: calc(78vh * 16 / 9);
   }
 }
 

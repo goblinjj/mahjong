@@ -37,6 +37,11 @@ export class Camera {
       });
       this.video.srcObject = this.stream;
       await this.video.play();
+      // 让容器 aspect-ratio 匹配视频原生比例,便于叠加层坐标线性对齐
+      const container = this.video.parentElement;
+      if (container && this.video.videoWidth && this.video.videoHeight) {
+        container.style.aspectRatio = `${this.video.videoWidth} / ${this.video.videoHeight}`;
+      }
       return true;
     } catch (err) {
       console.error('摄像头启动失败:', err);

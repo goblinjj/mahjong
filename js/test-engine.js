@@ -6,7 +6,7 @@
 // 由于我们使用 ES 模块，需要在 package.json 加 "type": "module"
 // 或使用 .mjs 扩展名。这里直接内联核心逻辑进行测试。
 
-import { createHand, isWinningHand, getTenpaiTiles, TILE_NAMES, WILD_TILE } from './mahjong-engine.js';
+import { createHand, isWinningHand, getTenpaiTiles, getShanten, TILE_NAMES, WILD_TILE } from './mahjong-engine.js';
 import { analyzeHand } from './analyzer.js';
 
 let passed = 0;
@@ -126,8 +126,8 @@ console.log('\n=== 测试3: 听牌分析 ===');
   hand[5] = 1; // 六万×1
   hand[6] = 1; // 七万×1
   const tenpai = getTenpaiTiles(hand, 0);
-  const tileNames = tenpai.map(t => TILE_NAMES[t.tileIndex]);
-  console.log(`  听牌: ${tileNames.join(', ')} (共${tenpai.reduce((s,t)=>s+t.count,0)}张)`);
+  const tileNames = tenpai.map(idx => TILE_NAMES[idx]);
+  console.log(`  听牌: ${tileNames.join(', ')} (共${tenpai.length}种)`);
   assert(tenpai.length > 0, `13张牌听牌分析有结果: ${tileNames.join(', ')}`);
 }
 
@@ -148,13 +148,14 @@ console.log('\n=== 测试4: 出牌分析 (14张) ===');
   // 14张: 111万222万333万4567九万 (打九万听四七万/八万)
   const result = analyzeHand(hand, 0);
   assert(result.type === 'discard', '14张牌出牌分析返回discard类型');
+  assert(result.shanten === 0, `听牌路径 shanten=0, 实际=${result.shanten}`);
   if (result.type === 'discard' && result.discards.length > 0) {
     const best = result.discards[0];
-    console.log(`  最优: 打「${best.tileName}」→ 听 ${best.totalCount} 张`);
-    best.tenpaiTiles.forEach(t => {
-      console.log(`    可胡: ${TILE_NAMES[t.tileIndex]} ×${t.count}`);
+    console.log(`  最优: 打「${best.tileName}」→ 听 ${best.ukeire.length} 种`);
+    best.ukeire.forEach(idx => {
+      console.log(`    可胡: ${TILE_NAMES[idx]}`);
     });
-    assert(best.totalCount > 0, `最优出牌有听牌: ${best.tileName} → ${best.totalCount}张`);
+    assert(best.ukeire.length > 0, `最优出牌有听牌: ${best.tileName} → ${best.ukeire.length}种`);
   }
 }
 
@@ -176,10 +177,48 @@ console.log('\n=== 测试5: 出牌分析 (含百搭) ===');
   assert(result.type === 'discard',
     `含百搭14张牌分析: type=${result.type}`);
   if (result.type === 'discard' && result.discards.length > 0) {
-    console.log(`  共 ${result.discards.length} 种出牌方案`);
+    console.log(`  共 ${result.discards.length} 种出牌方案 (shanten=${result.shanten})`);
     result.discards.slice(0, 3).forEach(d => {
-      console.log(`  打「${d.tileName}」→ 听 ${d.totalCount} 张`);
+      console.log(`  打「${d.tileName}」→ ${result.shanten === 0 ? '听' : '进张'} ${d.ukeire.length} 种`);
     });
+  }
+}
+
+// ============================================================
+console.log('\n=== 测试6: 向听数分析 ===');
+// ============================================================
+
+// 13张一向听: 3副面子 + 1对子 + 2散张
+// 例: 111万 222万 333万 55条 6条 7筒 (13张)
+// 6条 和 7筒 都是散张; 把 7筒 换成 7条 就是 111万222万333万55条67条,
+// 摸 5条 或 8条 可胡, 即为听牌 —— 只需 1 次交换就能到达听牌, 故一向听。
+{
+  const hand = createHand();
+  hand[0] = 3; hand[1] = 3; hand[2] = 3;    // 111万 222万 333万
+  hand[13] = 2;                              // 55条
+  hand[14] = 1;                              // 6条 (散张)
+  hand[24] = 1;                              // 7筒 (散张)
+  // 总计: 3+3+3+2+1+1 = 13 张
+  const s = getShanten(hand, 0, 2);
+  console.log(`  向听数: ${s}`);
+  assert(s === 1, `一向听手牌 shanten=1, 实际=${s}`);
+}
+
+// 14张手牌无法一步进入听牌, 但可推荐一向听打法
+{
+  const hand = createHand();
+  hand[0] = 1; hand[2] = 1; hand[4] = 1;   // 1万3万5万 (散牌)
+  hand[9] = 1; hand[10] = 1; hand[11] = 1;  // 456条
+  hand[18] = 1; hand[19] = 1; hand[20] = 1; // 456筒
+  hand[27] = 2;                              // 东东 (对子)
+  hand[28] = 1; hand[29] = 1; hand[30] = 1;  // 南西北 (风牌散)
+  const result = analyzeHand(hand, 0);
+  console.log(`  分析类型: ${result.type}, shanten=${result.shanten ?? 'N/A'}`);
+  assert(result.type === 'discard' || result.type === 'far_from_tenpai',
+    `未听牌手牌返回 discard 或 far_from_tenpai: ${result.type}`);
+  if (result.type === 'discard') {
+    assert(result.shanten >= 1, `未听牌手牌 shanten ≥ 1, 实际=${result.shanten}`);
+    console.log(`  最优打法: 打「${result.discards[0].tileName}」→ 进张 ${result.discards[0].ukeire.length} 种`);
   }
 }
 

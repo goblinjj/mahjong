@@ -149,9 +149,14 @@ export class TileSelector {
       label.textContent = SUIT_LABELS[sIdx];
       grid.appendChild(label);
 
+      // 每个花色的牌单独一行,永不换行(不足时缩小牌宽)
+      const row = document.createElement('div');
+      row.className = 'suit-row';
+      if (section.label === '字') row.classList.add('honors');
+
       for (let i = section.start; i <= section.end; i++) {
         const wrapper = document.createElement('div');
-        wrapper.style.position = 'relative';
+        wrapper.className = 'tile-wrapper';
 
         const tile = createTileElement(i, 'sm');
         tile.setAttribute('aria-label', `添加 ${getTileLabel(i)}`);
@@ -174,8 +179,9 @@ export class TileSelector {
         });
 
         this.selectorTiles.set(i, { wrapper, tile, countBadge });
-        grid.appendChild(wrapper);
+        row.appendChild(wrapper);
       }
+      grid.appendChild(row);
 
       // 分割线（最后一组不需要）
       if (sIdx < sections.length - 1) {
