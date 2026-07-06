@@ -9,6 +9,15 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/style.css">
+
+  <!-- ONNX Runtime Web (CDN)：为 recognition.js 提供全局 ort 对象 -->
+  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.19.2/dist/ort.min.js"></script>
+  <script>
+    // 将 wasm 二进制文件也指到同一 CDN，避免相对路径 404
+    if (window.ort && ort.env && ort.env.wasm) {
+      ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.19.2/dist/';
+    }
+  </script>
 </head>
 <body>
   <!-- Header -->
@@ -26,6 +35,12 @@
 
     <!-- Camera section (hidden by default) -->
     <section id="camera-section" class="hidden" aria-label="拍照识别区域">
+      <!-- 模型状态条 -->
+      <div id="model-status" class="model-status" role="status" aria-live="polite">
+        <span class="model-status-icon" aria-hidden="true">⏳</span>
+        <span class="model-status-text">正在加载识别模型...</span>
+      </div>
+
       <div id="camera-container">
         <video id="camera-video" autoplay playsinline aria-label="摄像头预览"></video>
         <canvas id="camera-canvas" aria-hidden="true"></canvas>
@@ -37,9 +52,33 @@
           <input type="file" id="file-input" accept="image/*" hidden aria-label="选择图片文件">
         </button>
       </div>
+      <div id="camera-controls-2">
+        <button id="btn-load-model" class="action-btn secondary" aria-label="加载本地 ONNX 模型">
+          📦 加载 ONNX 模型
+          <input type="file" id="model-file-input" accept=".onnx" hidden aria-label="选择 ONNX 模型文件">
+        </button>
+        <button id="btn-demo" class="action-btn secondary" aria-label="演示识别流程">🎮 演示识别</button>
+      </div>
       <div id="recognition-status" class="hidden" aria-live="polite">
         <div class="spinner" aria-hidden="true"></div>
         <span>识别中...</span>
+      </div>
+
+      <!-- 识别结果预览与修正 -->
+      <div id="detection-preview" class="hidden glass-panel">
+        <div class="section-header">
+          <h2>识别结果</h2>
+          <span id="detection-count" class="badge">0 张</span>
+        </div>
+        <div id="detection-canvas-wrap">
+          <canvas id="detection-canvas" aria-label="识别结果标注图"></canvas>
+        </div>
+        <p class="detection-hint">点击下方牌可删除误检；确认无误后点【应用到手牌】。</p>
+        <div id="detection-list" class="tile-row" role="list" aria-label="识别到的牌"></div>
+        <div id="detection-actions">
+          <button id="btn-detection-cancel" class="action-btn danger" aria-label="取消">取消</button>
+          <button id="btn-detection-apply" class="action-btn primary" aria-label="应用到手牌">✔ 应用到手牌</button>
+        </div>
       </div>
     </section>
 

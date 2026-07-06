@@ -2,16 +2,33 @@
  * recognition.js - ONNX Runtime Web 推理管线
  *
  * YOLOv8 麻将牌检测模型的预处理、推理、后处理管线。
- * 当模型文件不可用时，会优雅降级并提示用户。
+ * 支持三种模型来源：
+ *   1. 默认路径 /assets/model/mahjong_yolov8n.onnx
+ *   2. 用户通过 <input type="file"> 上传的 ArrayBuffer
+ *   3. 演示模式（无模型时使用示例牌型演示流程）
  */
+
+/**
+ * 模型状态枚举
+ */
+export const ModelStatus = {
+  UNLOADED: 'unloaded',      // 从未尝试加载
+  LOADING: 'loading',        // 正在加载
+  READY: 'ready',            // 加载成功
+  MISSING: 'missing',        // 模型文件不存在（404）
+  ORT_MISSING: 'ort_missing', // onnxruntime-web 未引入
+  ERROR: 'error',            // 其他加载错误
+};
 
 export class TileRecognizer {
   constructor() {
     /** @type {any} ONNX 推理会话 */
     this.session = null;
-    /** @type {boolean} 模型是否已加载 */
-    this.isLoaded = false;
-    /** @type {string} 模型文件路径 */
+    /** @type {string} 当前状态，见 ModelStatus */
+    this.status = ModelStatus.UNLOADED;
+    /** @type {string} 最近一次错误信息 */
+    this.lastError = '';
+    /** @type {string} 默认模型文件路径（相对于站点根） */
     this.modelPath = '/assets/model/mahjong_yolov8n.onnx';
 
     /** 检测置信度阈值 */
@@ -34,26 +51,74 @@ export class TileRecognizer {
   }
 
   /**
-   * 加载 ONNX 模型
+   * 是否已经就绪
+   * @returns {boolean}
+   */
+  get isLoaded() {
+    return this.status === ModelStatus.READY;
+  }
+
+  /**
+   * 加载 ONNX 模型（默认从 modelPath 拉取）
    * @returns {Promise<boolean>} 是否成功
    */
   async loadModel() {
+    if (typeof ort === 'undefined') {
+      this.status = ModelStatus.ORT_MISSING;
+      this.lastError = 'ONNX Runtime Web 未加载（检查网络/CDN 或本地部署）';
+      console.warn(this.lastError);
+      return false;
+    }
+
+    this.status = ModelStatus.LOADING;
     try {
-      // 检查 onnxruntime-web 是否可用
-      if (typeof ort === 'undefined') {
-        console.warn('ONNX Runtime Web 未加载');
+      // 先探测文件是否存在，便于给出更明确的报错
+      const resp = await fetch(this.modelPath, { method: 'HEAD' });
+      if (!resp.ok) {
+        this.status = ModelStatus.MISSING;
+        this.lastError = `未找到模型文件：${this.modelPath}（请训练后放入该路径，或点【加载 ONNX 模型】上传）`;
+        console.info(this.lastError);
         return false;
       }
 
       this.session = await ort.InferenceSession.create(this.modelPath, {
         executionProviders: ['webgpu', 'wasm'],
       });
-
-      this.isLoaded = true;
-      console.log('模型加载成功');
+      this.status = ModelStatus.READY;
+      console.log('✅ 模型加载成功');
       return true;
     } catch (err) {
-      console.warn('模型加载失败 (这是正常的，如果你还没有训练模型):', err.message);
+      this.status = ModelStatus.ERROR;
+      this.lastError = err.message || String(err);
+      console.warn('模型加载失败:', err);
+      return false;
+    }
+  }
+
+  /**
+   * 从用户选择的 File 对象加载模型（不需要模型放在服务器上）
+   * @param {File} file - 用户选择的 .onnx 文件
+   * @returns {Promise<boolean>}
+   */
+  async loadModelFromFile(file) {
+    if (typeof ort === 'undefined') {
+      this.status = ModelStatus.ORT_MISSING;
+      this.lastError = 'ONNX Runtime Web 未加载';
+      return false;
+    }
+    this.status = ModelStatus.LOADING;
+    try {
+      const buffer = await file.arrayBuffer();
+      this.session = await ort.InferenceSession.create(new Uint8Array(buffer), {
+        executionProviders: ['webgpu', 'wasm'],
+      });
+      this.status = ModelStatus.READY;
+      console.log(`✅ 从本地文件加载模型成功：${file.name}`);
+      return true;
+    } catch (err) {
+      this.status = ModelStatus.ERROR;
+      this.lastError = err.message || String(err);
+      console.warn('从文件加载模型失败:', err);
       return false;
     }
   }
@@ -61,32 +126,50 @@ export class TileRecognizer {
   /**
    * 检测图像中的麻将牌
    * @param {ImageData} imageData - 输入图像
-   * @returns {Promise<{success: boolean, tiles?: Array, message?: string}>}
+   * @returns {Promise<{success: boolean, tiles?: Array, message?: string, status?: string}>}
    */
   async detect(imageData) {
     if (!this.isLoaded) {
       return {
         success: false,
-        message: '模型未加载。请使用手动选牌模式，或将训练好的 ONNX 模型放入 assets/model/ 目录。',
+        status: this.status,
+        message: this.humanReadableStatus(),
       };
     }
 
     try {
-      // 预处理
       const input = this.preprocess(imageData);
-
-      // 推理
       const inputName = this.session.inputNames[0] || 'images';
       const feeds = { [inputName]: input };
       const results = await this.session.run(feeds);
-
-      // 后处理
       const detections = this.postprocess(results, imageData.width, imageData.height);
-
       return { success: true, tiles: detections };
     } catch (err) {
       console.error('推理失败:', err);
-      return { success: false, message: `推理出错: ${err.message}` };
+      return { success: false, status: 'inference_error', message: `推理出错: ${err.message}` };
+    }
+  }
+
+  /**
+   * 给出人类可读的当前状态描述（用于 UI 提示）
+   * @returns {string}
+   */
+  humanReadableStatus() {
+    switch (this.status) {
+      case ModelStatus.ORT_MISSING:
+        return 'ONNX Runtime Web 未能加载：请检查网络（脚本从 jsdelivr CDN 引入），或改用离线部署。';
+      case ModelStatus.MISSING:
+        return '尚未提供模型文件。请点击【加载 ONNX 模型】上传本地 .onnx，或将文件放入 assets/model/mahjong_yolov8n.onnx。';
+      case ModelStatus.ERROR:
+        return `模型加载失败：${this.lastError}`;
+      case ModelStatus.LOADING:
+        return '模型正在加载，请稍候...';
+      case ModelStatus.UNLOADED:
+        return '模型未加载';
+      case ModelStatus.READY:
+        return '模型就绪';
+      default:
+        return '未知状态';
     }
   }
 
@@ -100,27 +183,23 @@ export class TileRecognizer {
    * @returns {any} ort.Tensor
    */
   preprocess(imageData) {
-    const { width: srcW, height: srcH, data: srcData } = imageData;
+    const { width: srcW, height: srcH } = imageData;
     const targetSize = this.inputSize;
 
-    // 计算等比缩放比例（letter-box）
     const scale = Math.min(targetSize / srcW, targetSize / srcH);
     const newW = Math.round(srcW * scale);
     const newH = Math.round(srcH * scale);
     const padX = Math.round((targetSize - newW) / 2);
     const padY = Math.round((targetSize - newH) / 2);
 
-    // 使用离屏 canvas 进行缩放
     const canvas = document.createElement('canvas');
     canvas.width = targetSize;
     canvas.height = targetSize;
     const ctx = canvas.getContext('2d');
 
-    // 灰色填充背景 (114/255 ≈ YOLOv8 default pad)
     ctx.fillStyle = 'rgb(114, 114, 114)';
     ctx.fillRect(0, 0, targetSize, targetSize);
 
-    // 绘制缩放后的图像
     const tmpCanvas = document.createElement('canvas');
     tmpCanvas.width = srcW;
     tmpCanvas.height = srcH;
@@ -129,21 +208,18 @@ export class TileRecognizer {
 
     ctx.drawImage(tmpCanvas, 0, 0, srcW, srcH, padX, padY, newW, newH);
 
-    // 读取像素数据
     const pixelData = ctx.getImageData(0, 0, targetSize, targetSize).data;
 
-    // RGBA → CHW RGB float32, 归一化到 [0, 1]
     const float32Data = new Float32Array(3 * targetSize * targetSize);
     const channelSize = targetSize * targetSize;
 
     for (let i = 0; i < channelSize; i++) {
-      const srcIdx = i * 4; // RGBA
-      float32Data[i] = pixelData[srcIdx] / 255.0;                       // R
-      float32Data[i + channelSize] = pixelData[srcIdx + 1] / 255.0;     // G
-      float32Data[i + 2 * channelSize] = pixelData[srcIdx + 2] / 255.0; // B
+      const srcIdx = i * 4;
+      float32Data[i] = pixelData[srcIdx] / 255.0;
+      float32Data[i + channelSize] = pixelData[srcIdx + 1] / 255.0;
+      float32Data[i + 2 * channelSize] = pixelData[srcIdx + 2] / 255.0;
     }
 
-    // 保存缩放信息，后处理时用于还原坐标
     this._lastScale = scale;
     this._lastPadX = padX;
     this._lastPadY = padY;
@@ -164,15 +240,13 @@ export class TileRecognizer {
    * @returns {Array<{tileIndex: number, confidence: number, bbox: {x: number, y: number, w: number, h: number}}>}
    */
   postprocess(results, origW, origH) {
-    // 获取输出张量
     const outputName = this.session.outputNames[0];
     const output = results[outputName];
     const outputData = output.data;
-    const dims = output.dims; // [1, 4+numClasses, numAnchors]
+    const dims = output.dims;
 
-    const numClasses = this.classNames.length; // 34
+    const numClasses = this.classNames.length;
     const numAnchors = dims[2];
-    const stride = dims[1]; // 4 + numClasses = 38
 
     const scale = this._lastScale || 1;
     const padX = this._lastPadX || 0;
@@ -183,13 +257,11 @@ export class TileRecognizer {
     const classIds = [];
 
     for (let a = 0; a < numAnchors; a++) {
-      // 提取 bbox (cx, cy, w, h)
       const cx = outputData[0 * numAnchors + a];
       const cy = outputData[1 * numAnchors + a];
       const bw = outputData[2 * numAnchors + a];
       const bh = outputData[3 * numAnchors + a];
 
-      // 找最大类别置信度
       let maxScore = -Infinity;
       let maxClassId = -1;
       for (let c = 0; c < numClasses; c++) {
@@ -202,7 +274,6 @@ export class TileRecognizer {
 
       if (maxScore < this.confThreshold) continue;
 
-      // 将坐标从 letter-boxed 空间还原到原图空间
       const x = (cx - bw / 2 - padX) / scale;
       const y = (cy - bh / 2 - padY) / scale;
       const w = bw / scale;
@@ -213,7 +284,6 @@ export class TileRecognizer {
       classIds.push(maxClassId);
     }
 
-    // NMS
     const keepIndices = this.nms(boxes, scores, this.iouThreshold);
 
     const detections = keepIndices.map((idx) => ({
@@ -223,23 +293,18 @@ export class TileRecognizer {
       bbox: boxes[idx],
     }));
 
-    // 按置信度降序排列
-    detections.sort((a, b) => b.confidence - a.confidence);
+    // 按 x 排序：更贴近"人眼从左到右阅读牌墙"的习惯
+    detections.sort((a, b) => a.bbox.x - b.bbox.x);
 
     return detections;
   }
 
   /**
    * Non-Maximum Suppression (NMS)
-   * @param {Array<{x: number, y: number, w: number, h: number}>} boxes
-   * @param {Array<number>} scores
-   * @param {number} iouThreshold
-   * @returns {Array<number>} 保留的索引
    */
   nms(boxes, scores, iouThreshold = 0.5) {
     if (boxes.length === 0) return [];
 
-    // 按分数降序排列索引
     const indices = Array.from({ length: boxes.length }, (_, i) => i);
     indices.sort((a, b) => scores[b] - scores[a]);
 
@@ -252,7 +317,6 @@ export class TileRecognizer {
 
       for (const j of indices) {
         if (j <= i || suppressed.has(j)) continue;
-
         const iou = this.computeIoU(boxes[i], boxes[j]);
         if (iou > iouThreshold) {
           suppressed.add(j);
@@ -265,9 +329,6 @@ export class TileRecognizer {
 
   /**
    * 计算两个矩形的 IoU
-   * @param {{x: number, y: number, w: number, h: number}} a
-   * @param {{x: number, y: number, w: number, h: number}} b
-   * @returns {number} IoU 值 [0, 1]
    */
   computeIoU(a, b) {
     const ax1 = a.x, ay1 = a.y, ax2 = a.x + a.w, ay2 = a.y + a.h;
@@ -288,4 +349,49 @@ export class TileRecognizer {
 
     return unionArea > 0 ? interArea / unionArea : 0;
   }
+}
+
+/**
+ * 无模型时的演示识别：从预设手牌样例中随机生成检测结果。
+ * 提供合成的 bbox 坐标以便预览画布能标注。
+ *
+ * @param {number} imgW
+ * @param {number} imgH
+ * @returns {Array<{tileIndex: number, confidence: number, bbox: object, className: string}>}
+ */
+export function buildDemoDetections(imgW, imgH) {
+  // 三组代表性示例，随机选一组
+  const samples = [
+    // 示例 A：一手接近听牌的手牌
+    [0, 1, 2, 9, 10, 11, 18, 19, 20, 27, 27, 31, 31],
+    // 示例 B：七对子路径
+    [0, 0, 5, 5, 12, 12, 20, 20, 27, 27, 32, 32, 33],
+    // 示例 C：万字牌型
+    [3, 4, 5, 6, 7, 8, 15, 16, 17, 24, 25, 26, 31],
+  ];
+  const chosen = samples[Math.floor(Math.random() * samples.length)];
+
+  const classNames = [
+    '1wan', '2wan', '3wan', '4wan', '5wan', '6wan', '7wan', '8wan', '9wan',
+    '1tiao', '2tiao', '3tiao', '4tiao', '5tiao', '6tiao', '7tiao', '8tiao', '9tiao',
+    '1tong', '2tong', '3tong', '4tong', '5tong', '6tong', '7tong', '8tong', '9tong',
+    'dong', 'nan', 'xi', 'bei', 'zhong', 'fa', 'bai',
+  ];
+
+  const pad = Math.min(imgW, imgH) * 0.05;
+  const rowY = imgH * 0.55;
+  const tileW = (imgW - pad * 2) / chosen.length * 0.85;
+  const tileH = tileW * 1.35;
+
+  return chosen.map((tileIndex, i) => ({
+    tileIndex,
+    confidence: 0.75 + Math.random() * 0.2,
+    className: classNames[tileIndex],
+    bbox: {
+      x: pad + i * ((imgW - pad * 2) / chosen.length),
+      y: rowY - tileH / 2,
+      w: tileW,
+      h: tileH,
+    },
+  }));
 }

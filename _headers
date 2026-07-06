@@ -1,0 +1,18 @@
+# Cloudflare Pages 响应头配置
+# 参考: https://developers.cloudflare.com/pages/configuration/headers/
+
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(self)
+
+# ONNX 模型文件：允许长时间缓存
+/assets/model/*.onnx
+  Cache-Control: public, max-age=31536000, immutable
+  Content-Type: application/octet-stream
+
+# JS/CSS：短缓存，方便迭代
+/js/*
+  Cache-Control: public, max-age=300
+/css/*
+  Cache-Control: public, max-age=300

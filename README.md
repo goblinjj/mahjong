@@ -61,12 +61,23 @@ node js/test-engine.js
 
 ### 3. 配置本地 AI 拍照识别
 
-为了开启拍照自动识别牌面功能，您需要将训练好的 YOLO 模型放入本地目录：
+拍照识别使用浏览器端的 **ONNX Runtime Web**（由 `index.html` 从 jsdelivr CDN 引入 `ort.min.js` 及配套 wasm）。识别模型接入有三种方式：
 
-1. 准备您的 YOLOv8 训练模型，并导出为 `.onnx` 格式。
-2. 将文件重命名为 `mahjong_yolov8n.onnx`。
-3. 放入此路径：`assets/model/mahjong_yolov8n.onnx`。
-4. 重新刷新网页，点击【拍照识别】即可运行本地推理。*(如果未放置模型，系统会自动降级并引导至手动选牌模式)*
+**方式 A · 默认路径**
+1. 训练 YOLOv8 麻将牌检测模型（类别定义详见 [`assets/model/README.md`](./assets/model/README.md)）。
+2. 导出为 ONNX：`yolo export model=best.pt format=onnx opset=12 simplify=True`。
+3. 重命名为 `mahjong_yolov8n.onnx`，放到 `assets/model/`。
+4. 刷新页面 → 切换到【📷 拍照识别】→ 顶部状态条应显示 "识别模型就绪"。
+
+**方式 B · 页面上传（无需部署模型）**
+- 切换到拍照识别页 → 点击【📦 加载 ONNX 模型】→ 选择本地任意位置的 `.onnx` 文件。
+- 模型在浏览器内存中运行，不会上传到任何服务器。
+
+**方式 C · 演示识别（无模型也能跑通）**
+- 点击【🎮 演示识别】→ 使用一组预设的示例检测结果，走通 "识别 → 预览与修正 → 应用到手牌" 完整流程。
+- 拿这一步验证 UI/分析引擎；确认无误后再回到方式 A/B 接入真实模型。
+
+拍照/上传后会显示带检测框的原图 + 可点击删除的识别结果列表，你可以在应用到手牌之前修正误检。
 
 ## ⚖️ 许可
 

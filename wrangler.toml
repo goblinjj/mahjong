@@ -1,0 +1,6 @@
+# Cloudflare Pages 配置
+# 参考: https://developers.cloudflare.com/pages/functions/wrangler-configuration/
+
+name = "mahjong-analyzer"
+compatibility_date = "2024-11-01"
+pages_build_output_dir = "."

@@ -687,6 +687,98 @@ body::before {
   font-size: 0.85rem;
 }
 
+/* ---- Model status banner ---- */
+.model-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  border-radius: var(--radius-md);
+  font-size: 0.82rem;
+  line-height: 1.4;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  color: var(--text-secondary);
+}
+
+.model-status.loading { border-color: rgba(255, 255, 255, 0.15); }
+.model-status.ok {
+  border-color: var(--accent-jade-dim);
+  color: var(--accent-jade);
+  background: rgba(0, 212, 170, 0.06);
+}
+.model-status.warn {
+  border-color: var(--accent-gold-dim);
+  color: var(--accent-gold);
+  background: rgba(212, 165, 116, 0.06);
+}
+.model-status.error {
+  border-color: var(--danger-dim);
+  color: var(--danger);
+  background: rgba(231, 76, 60, 0.06);
+}
+
+.model-status-icon {
+  font-size: 1rem;
+  flex-shrink: 0;
+}
+
+/* ---- 拍照第二排控件 ---- */
+#camera-controls-2 {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+#camera-controls-2 .action-btn {
+  flex: 1;
+  font-size: 0.85rem;
+}
+
+/* ---- 识别结果预览 ---- */
+#detection-preview {
+  margin-top: 12px;
+  animation: fadeInUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+#detection-canvas-wrap {
+  width: 100%;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  background: #000;
+  margin-bottom: 10px;
+}
+
+#detection-canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.detection-hint {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin-bottom: 10px;
+  line-height: 1.4;
+}
+
+#detection-list {
+  margin-bottom: 12px;
+  min-height: 40px;
+}
+
+#detection-actions {
+  display: flex;
+  gap: 10px;
+}
+
+#detection-actions .action-btn {
+  flex: 1;
+}
+
+#btn-detection-cancel { flex: 0.4 !important; }
+
 /* ============================================================
    Spinner
    ============================================================ */
