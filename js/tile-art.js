@@ -147,8 +147,7 @@ function cane(cx, cy, w, h, color = 'green', angle = 0) {
  * 每条竹节用深绿描边 + 亮绿管身的双线勾勒，圆头圆角。
  */
 function eightTiao() {
-  const outer = '#0c5a24'; // 深绿描边
-  const body = '#20a24b';  // 亮绿管身
+  const body = '#20a24b';  // 亮绿管身(无描边)
   const shine = '#5cc07f'; // 高光
   // W：左上→下→中上→下→右上
   const wPath = 'M22 20 L28 54 L44 30 L60 54 L66 20';
@@ -158,7 +157,7 @@ function eightTiao() {
     `<path d="${d}" fill="none" stroke="${color}" stroke-width="${width}"`
     + ` stroke-linecap="round" stroke-linejoin="round"${opacity < 1 ? ` opacity="${opacity}"` : ''}/>`;
   const draw = (d) =>
-    stroke(d, outer, 11) + stroke(d, body, 6.5) + stroke(d, shine, 2, 0.55);
+    stroke(d, body, 9) + stroke(d, shine, 2.5, 0.55);
   return draw(wPath) + draw(mPath);
 }
 
