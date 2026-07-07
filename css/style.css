@@ -731,19 +731,19 @@ body::before {
   z-index: 2;
 }
 
-/* 虚线之外区域轻微变暗,提示只识别条带内内容 */
+/* 虚线之外区域完全遮挡,只显示取相框(虚线条带)内的画面 */
 #camera-container::before {
   content: '';
   position: absolute;
   inset: 0;
   background:
     linear-gradient(to bottom,
-      rgba(0, 0, 0, 0.45) 0,
-      rgba(0, 0, 0, 0.45) 35%,
+      #000 0,
+      #000 35%,
       transparent 35%,
       transparent 65%,
-      rgba(0, 0, 0, 0.45) 65%,
-      rgba(0, 0, 0, 0.45) 100%);
+      #000 65%,
+      #000 100%);
   pointer-events: none;
   z-index: 1;
 }
