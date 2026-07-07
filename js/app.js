@@ -511,6 +511,9 @@ function renderResult(result) {
     case 'tenpai':
       renderTenpai(result);
       break;
+    case 'shanten':
+      renderShanten(result);
+      break;
     case 'discard':
       renderDiscard(result);
       break;
@@ -589,6 +592,38 @@ function renderTenpai(result) {
 
 /** 向听数对应的中文名称 */
 const SHANTEN_LABEL = { 0: '听牌', 1: '一向听', 2: '二向听' };
+
+/**
+ * 3k+1 状态未听牌时的向听提示 (一向听 / 二向听 + 有效进张)
+ */
+function renderShanten(result) {
+  const shantenLabel = SHANTEN_LABEL[result.shanten] ?? `${result.shanten} 向听`;
+  resultTitle.textContent =
+    `向听分析 · ${result.total} 张手牌 · ${shantenLabel} · 进张 ${result.ukeire.length} 种`;
+
+  const card = document.createElement('div');
+  card.className = 'result-card best';
+  card.innerHTML = `
+    <div class="tenpai-direct">
+      <div class="status-title" style="margin-bottom:8px">
+        当前是${shantenLabel}
+      </div>
+      <div class="tenpai-label">
+        有效进张
+        <span class="count">${result.ukeire.length} 种</span>
+      </div>
+    </div>
+  `;
+
+  const tilesContainer = document.createElement('div');
+  tilesContainer.className = 'tenpai-tiles';
+  result.ukeire.forEach((tileIndex) => {
+    tilesContainer.appendChild(createTileElement(tileIndex, 'sm'));
+  });
+  card.querySelector('.tenpai-direct').appendChild(tilesContainer);
+
+  resultContent.appendChild(card);
+}
 
 function renderDiscard(result) {
   if (result.discards.length === 0) {

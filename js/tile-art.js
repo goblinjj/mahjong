@@ -24,12 +24,27 @@ const TONG_ROWS = {
 };
 const TIAO_ROWS = {
   2: [2], 3: [1, 2], 4: [2, 2], 5: [2, 1, 2],
-  6: [3, 3], 7: [1, 3, 3], 8: [2, 2, 2, 2], 9: [3, 3, 3],
+  6: [3, 3], 7: [1, 3, 3], 9: [3, 3, 3],
+  // 8 条单独用 eightTiao() 绘制斜排造型
 };
 
 // 条子红色竹节：5条中间行、7条顶行
 function isRedRow(n, rowIdx) {
   return (n === 5 && rowIdx === 1) || (n === 7 && rowIdx === 0);
+}
+
+// 竹节配色（绿/红/蓝）
+const CANE_THEMES = {
+  green: { body: '#20a24b', edge: '#0c5a24', node: '#0a4a1e' },
+  red:   { body: '#d42a40', edge: '#8a0f22', node: '#7a0c1c' },
+  blue:  { body: '#2e7fc0', edge: '#0f4c86', node: '#0d3d6b' },
+};
+
+/** 条子按排配色：9条上绿、中红、下蓝；5条/7条的红节行为红，其余为绿 */
+function caneColor(n, rowIdx) {
+  if (n === 9) return ['green', 'red', 'blue'][rowIdx] || 'green';
+  if (isRedRow(n, rowIdx)) return 'red';
+  return 'green';
 }
 
 /** 计算网格中每个牌点的中心坐标 */
@@ -57,9 +72,9 @@ const COIN_THEMES = {
   red: { outer: '#d5495a', edge: '#8a1020', inner: '#c2263a', innerEdge: '#7a0c1c' },
 };
 
-/** 六筒/九筒按排配色：上绿、中红、下蓝；其余牌统一蓝色 */
+/** 五筒/六筒/九筒按排配色：上绿、中红、下蓝；其余牌统一蓝色 */
 function tongTheme(n, rowIdx) {
-  if (n === 6 || n === 9) return ['green', 'red', 'blue'][rowIdx] || 'blue';
+  if (n === 5 || n === 6 || n === 9) return ['green', 'red', 'blue'][rowIdx] || 'blue';
   return 'blue';
 }
 
@@ -92,24 +107,26 @@ function sevenTong() {
   const xC = VB_W / 2;
   const xR = AREA_R - AREA_W * 0.22;
   let s = '';
-  s += coin(xL, yLo, r);
-  s += coin(xC, (yHi + yLo) / 2, r);
-  s += coin(xR, yHi, r);
+  // 顶部斜排 3 枚：绿色
+  s += coin(xL, yLo, r, { theme: 'green' });
+  s += coin(xC, (yHi + yLo) / 2, r, { theme: 'green' });
+  s += coin(xR, yHi, r, { theme: 'green' });
   const bandT = AREA_T + topH;
   const bandH = AREA_B - bandT;
   const yb0 = bandT + bandH * 0.28;
   const yb1 = bandT + bandH * 0.72;
   const xb0 = AREA_L + AREA_W * 0.28;
   const xb1 = AREA_R - AREA_W * 0.28;
-  [[xb0, yb0], [xb1, yb0], [xb0, yb1], [xb1, yb1]].forEach(([x, y]) => { s += coin(x, y, r); });
+  // 下方 2×2：上排红、下排蓝
+  [[xb0, yb0], [xb1, yb0], [xb0, yb1], [xb1, yb1]].forEach(([x, y], idx) => {
+    s += coin(x, y, r, { theme: idx < 2 ? 'red' : 'blue' });
+  });
   return s;
 }
 
-/** 一根竹节 */
-function cane(cx, cy, w, h, red = false) {
-  const col = red
-    ? { body: '#d42a40', edge: '#8a0f22', node: '#7a0c1c' }
-    : { body: '#20a24b', edge: '#0c5a24', node: '#0a4a1e' };
+/** 一根竹节。color 为 'green'|'red'|'blue'，angle 为绕自身中心的旋转角(度) */
+function cane(cx, cy, w, h, color = 'green', angle = 0) {
+  const col = CANE_THEMES[color] || CANE_THEMES.green;
   const x = cx - w / 2;
   const y = cy - h / 2;
   const rx = w * 0.45;
@@ -120,6 +137,41 @@ function cane(cx, cy, w, h, red = false) {
   const nodeH = Math.max(h * 0.055, 1.4);
   s += `<rect x="${n2(x)}" y="${n2(cy - nodeH / 2)}" width="${n2(w)}" height="${n2(nodeH)}" fill="${col.node}" opacity="0.55"/>`;
   s += `<rect x="${n2(x)}" y="${n2(y + h * 0.28 - nodeH / 2)}" width="${n2(w)}" height="${n2(nodeH)}" fill="${col.node}" opacity="0.45"/>`;
+  if (angle) return `<g transform="rotate(${n2(angle)} ${n2(cx)} ${n2(cy)})">${s}</g>`;
+  return s;
+}
+
+/** 八条：上下各 4 根竹节斜向张开，形成对称的蝴蝶/沙漏造型 */
+function eightTiao() {
+  const w = 9;
+  const h = 33;
+  const cyTop = AREA_T + AREA_H * 0.28;
+  const cyBot = AREA_B - AREA_H * 0.28;
+  const xs = [0, 1, 2, 3].map((i) => AREA_L + (i + 0.5) * AREA_W / 4);
+  const ang = [-16, -6, 6, 16]; // 上排张角，下排取反形成镜像
+  let s = '';
+  xs.forEach((x, i) => { s += cane(x, cyTop, w, h, 'green', ang[i]); });
+  xs.forEach((x, i) => { s += cane(x, cyBot, w, h, 'green', -ang[i]); });
+  return s;
+}
+
+/** 六筒：上方 2 枚成对，下方 2×2 四枚，中间留出明显空隙 */
+function sixTong() {
+  const r = 12.5;
+  const xL = AREA_L + AREA_W * 0.28;
+  const xR = AREA_R - AREA_W * 0.28;
+  let s = '';
+  // 上方一对(绿)
+  const yTop = AREA_T + AREA_H * 0.15;
+  s += coin(xL, yTop, r, { theme: 'green' });
+  s += coin(xR, yTop, r, { theme: 'green' });
+  // 下方 2×2(上排红、下排蓝)，整体下移与上方拉开距离
+  const yMid = AREA_T + AREA_H * 0.6;
+  const yBot = AREA_T + AREA_H * 0.87;
+  s += coin(xL, yMid, r, { theme: 'red' });
+  s += coin(xR, yMid, r, { theme: 'red' });
+  s += coin(xL, yBot, r, { theme: 'blue' });
+  s += coin(xR, yBot, r, { theme: 'blue' });
   return s;
 }
 
@@ -178,6 +230,8 @@ export function pipFaceSVG(kind, n) {
       body += coin(AREA_L + AREA_W * 0.26, AREA_T + AREA_H * 0.22, r);
       body += coin(VB_W / 2, VB_H / 2, r);
       body += coin(AREA_R - AREA_W * 0.26, AREA_B - AREA_H * 0.22, r);
+    } else if (n === 6) {
+      body = sixTong();
     } else if (n === 7) {
       body = sevenTong();
     } else {
@@ -185,13 +239,15 @@ export function pipFaceSVG(kind, n) {
       const r = Math.min(AREA_W / pos[0].maxC, AREA_H / pos[0].rows) / 2 * 0.82;
       pos.forEach((p) => { body += coin(p.cx, p.cy, r, { theme: tongTheme(n, p.rowIdx) }); });
     }
+  } else if (kind === 'tiao' && n === 8) {
+    body = eightTiao();
   } else {
     // 条子 2-9
     const rows = TIAO_ROWS[n];
     const pos = gridPositions(rows);
     const w = Math.min(AREA_W / pos[0].maxC * 0.5, 14);
     const h = Math.min(AREA_H / pos[0].rows * 0.84, 30);
-    pos.forEach((p) => { body += cane(p.cx, p.cy, w, h, isRedRow(n, p.rowIdx)); });
+    pos.forEach((p) => { body += cane(p.cx, p.cy, w, h, caneColor(n, p.rowIdx)); });
   }
 
   return `<svg class="tile-svg" viewBox="0 0 ${VB_W} ${VB_H}" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" aria-hidden="true">${body}</svg>`;

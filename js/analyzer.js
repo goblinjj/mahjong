@@ -52,7 +52,12 @@ const MAX_SHANTEN_DEPTH = 2;
  *
  *   type='tenpai':
  *     { type, total, tenpaiTiles: number[] }
- *     3k+1 状态的听牌情况(tenpaiTiles 为可胡的牌索引数组)
+ *     3k+1 状态且已听牌(tenpaiTiles 为可胡的牌索引数组)
+ *
+ *   type='shanten':
+ *     { type, total, shanten, ukeire: number[] }
+ *     3k+1 状态但未听牌。shanten 为向听数(1=一向听, 2=二向听),
+ *     ukeire 为摸到后能让向听数下降的有效进张牌索引数组。
  *
  *   type='invalid':
  *     { type, message: string }
@@ -82,7 +87,17 @@ export function analyzeHand(tiles, wildCount) {
   // 3k+1 状态 (1/4/7/10/13): 听牌分析
   if (mod === 1) {
     const tenpaiTiles = getTenpaiTiles(tiles, wildCount);
-    return { type: 'tenpai', total, tenpaiTiles };
+    if (tenpaiTiles.length > 0) {
+      return { type: 'tenpai', total, tenpaiTiles };
+    }
+    // 未听牌: 计算向听数, 提示一向听/二向听及有效进张
+    resetShantenCache();
+    const shanten = getShanten(tiles, wildCount, MAX_SHANTEN_DEPTH);
+    if (shanten > MAX_SHANTEN_DEPTH) {
+      return { type: 'far_from_tenpai', total, minShanten: MAX_SHANTEN_DEPTH + 1 };
+    }
+    const ukeire = getUkeire(tiles, wildCount, shanten);
+    return { type: 'shanten', total, shanten, ukeire };
   }
 
   // total 为 3、6、9、12 —— 不是任何合法麻将进程状态
