@@ -216,11 +216,20 @@ async function detectionTick() {
   setTimeout(detectionTick, 80);
 }
 
-/** 视频尺寸改变(如设备旋转)时,同步容器 aspect-ratio,让叠加层坐标始终线性对齐 */
+/** 取相框视口显示的条带占全帧高度的比例(与 BAND_TOP/BOTTOM_FRAC 一致) */
+const VISIBLE_BAND_FRAC = 1 - BAND_TOP_FRAC - BAND_BOTTOM_FRAC;
+
+/**
+ * 视频尺寸改变(如设备旋转)时,把取相框视口 aspect-ratio 设为
+ * 「视频宽 : 视频高×可见条带比例」,使视口正好只显示中间条带,不留黑边。
+ * 内层 #camera-frame 用固定 CSS 平移对齐,叠加层坐标仍按全帧线性缩放。
+ */
 function ensureContainerAspect() {
-  const container = cameraVideo.parentElement;
+  const frame = cameraVideo.parentElement;        // #camera-frame
+  const container = frame && frame.parentElement;  // #camera-container
   if (!container || cameraVideo.videoWidth === 0) return;
-  const desired = `${cameraVideo.videoWidth} / ${cameraVideo.videoHeight}`;
+  const stripH = cameraVideo.videoHeight * VISIBLE_BAND_FRAC;
+  const desired = `${cameraVideo.videoWidth} / ${stripH}`;
   if (container.style.aspectRatio !== desired) {
     container.style.aspectRatio = desired;
   }

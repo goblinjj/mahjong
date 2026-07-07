@@ -688,15 +688,26 @@ body::before {
 /* ============================================================
    Camera Section
    ============================================================ */
+/* 取相框视口:只显示牌条带(全帧中间 30% 高度),不展示框外部分 */
 #camera-container {
   position: relative;
   width: 100%;
-  aspect-ratio: 4 / 3;
-  max-height: 72vh;
+  /* 条带宽高比 = 视频宽 : (视频高 × 0.3);JS 按实际视频比例覆盖 */
+  aspect-ratio: 40 / 9;
   background: #000;
   border-radius: var(--radius-md);
   overflow: hidden;
   margin: 0 auto 12px;
+}
+
+/* 完整视频帧:高度为视口的 1/0.3,向上平移 35%,使中间条带对齐视口 */
+#camera-frame {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 333.333%;
+  transform: translateY(-35%);
 }
 
 #camera-video {
@@ -710,7 +721,7 @@ body::before {
   display: none;
 }
 
-/* 实时识别叠加层:铺满视频区域,与视频左上角对齐 */
+/* 实时识别叠加层:铺满完整帧,与视频左上角对齐 */
 #camera-overlay {
   position: absolute;
   inset: 0;
@@ -720,32 +731,15 @@ body::before {
   z-index: 3;
 }
 
-/* 拍摄框虚线引导:横向占满 · 纵向仅容一张牌高度 */
+/* 取相框上下边缘虚线,标示拍摄条带 */
 #camera-container::after {
   content: '';
   position: absolute;
-  inset: 35% 0;
+  inset: 0;
   border-top: 2px dashed rgba(0, 212, 170, 0.5);
   border-bottom: 2px dashed rgba(0, 212, 170, 0.5);
   pointer-events: none;
-  z-index: 2;
-}
-
-/* 虚线之外区域完全遮挡,只显示取相框(虚线条带)内的画面 */
-#camera-container::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background:
-    linear-gradient(to bottom,
-      #000 0,
-      #000 35%,
-      transparent 35%,
-      transparent 65%,
-      #000 65%,
-      #000 100%);
-  pointer-events: none;
-  z-index: 1;
+  z-index: 5;
 }
 
 /* 实时识别数量提示 */
