@@ -72,8 +72,9 @@ const COIN_THEMES = {
   red: { outer: '#d5495a', edge: '#8a1020', inner: '#c2263a', innerEdge: '#7a0c1c' },
 };
 
-/** 五筒/六筒/九筒按排配色：上绿、中红、下蓝；其余牌统一蓝色 */
+/** 二筒/五筒/六筒/九筒按排配色：上绿、中红、下蓝；其余牌统一蓝色 */
 function tongTheme(n, rowIdx) {
+  if (n === 2) return ['green', 'blue'][rowIdx] || 'blue';
   if (n === 5 || n === 6 || n === 9) return ['green', 'red', 'blue'][rowIdx] || 'blue';
   return 'blue';
 }
@@ -97,20 +98,20 @@ function coin(cx, cy, r, opts = {}) {
   return s;
 }
 
-/** 七筒：顶部 3 枚从左下至右上斜排，下方 2×2 */
+/** 七筒：顶部 3 枚从左上至右下斜排，下方 2×2 */
 function sevenTong() {
   const r = 11.5;
   const topH = AREA_H * 0.42;
-  const yHi = AREA_T + r + 1;          // 右上
-  const yLo = AREA_T + topH - r + 1;   // 左下
+  const yTop = AREA_T + r + 1;          // 左上
+  const yBot = AREA_T + topH - r + 1;   // 右下
   const xL = AREA_L + AREA_W * 0.22;
   const xC = VB_W / 2;
   const xR = AREA_R - AREA_W * 0.22;
   let s = '';
-  // 顶部斜排 3 枚：绿色
-  s += coin(xL, yLo, r, { theme: 'green' });
-  s += coin(xC, (yHi + yLo) / 2, r, { theme: 'green' });
-  s += coin(xR, yHi, r, { theme: 'green' });
+  // 顶部斜排 3 枚(左上→右下)：绿色
+  s += coin(xL, yTop, r, { theme: 'green' });
+  s += coin(xC, (yTop + yBot) / 2, r, { theme: 'green' });
+  s += coin(xR, yBot, r, { theme: 'green' });
   const bandT = AREA_T + topH;
   const bandH = AREA_B - bandT;
   const yb0 = bandT + bandH * 0.28;
@@ -231,11 +232,11 @@ export function pipFaceSVG(kind, n) {
     if (n === 1) {
       body = coin(VB_W / 2, VB_H / 2, 26, { ornate: true });
     } else if (n === 3) {
-      // 斜排三筒
+      // 斜排三筒(左上→右下)：绿、红、蓝
       const r = 13;
-      body += coin(AREA_L + AREA_W * 0.26, AREA_T + AREA_H * 0.22, r);
-      body += coin(VB_W / 2, VB_H / 2, r);
-      body += coin(AREA_R - AREA_W * 0.26, AREA_B - AREA_H * 0.22, r);
+      body += coin(AREA_L + AREA_W * 0.26, AREA_T + AREA_H * 0.22, r, { theme: 'green' });
+      body += coin(VB_W / 2, VB_H / 2, r, { theme: 'red' });
+      body += coin(AREA_R - AREA_W * 0.26, AREA_B - AREA_H * 0.22, r, { theme: 'blue' });
     } else if (n === 6) {
       body = sixTong();
     } else if (n === 7) {
