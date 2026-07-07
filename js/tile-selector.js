@@ -41,7 +41,9 @@ function getTileChars(index) {
   if (index <= 26) {
     const suitIdx = Math.floor(index / 9);
     const numIdx = index % 9;
-    return { num: NUM_CHARS[numIdx], suit: SUIT_CHARS[suitIdx] };
+    // 万子的五写作大写"伍"（伍萬），条/筒仍用普通"五"
+    const num = suitIdx === 0 && numIdx === 4 ? '伍' : NUM_CHARS[numIdx];
+    return { num, suit: SUIT_CHARS[suitIdx] };
   }
   return { num: HONOR_CHARS[index - 27], suit: null };
 }

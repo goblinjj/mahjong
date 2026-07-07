@@ -23,7 +23,7 @@ const TONG_ROWS = {
   6: [2, 2, 2], 7: [3, 2, 2], 8: [2, 2, 2, 2], 9: [3, 3, 3],
 };
 const TIAO_ROWS = {
-  2: [2], 3: [1, 2], 4: [2, 2], 5: [2, 1, 2],
+  2: [1, 1], 3: [1, 2], 4: [2, 2], 5: [2, 1, 2],
   6: [3, 3], 7: [1, 3, 3], 9: [3, 3, 3],
   // 8 条单独用 eightTiao() 绘制斜排造型
 };
@@ -141,18 +141,24 @@ function cane(cx, cy, w, h, color = 'green', angle = 0) {
   return s;
 }
 
-/** 八条：上下各 4 根竹节斜向张开，形成对称的蝴蝶/沙漏造型 */
+/**
+ * 八条：传统 "WM" 造型 —— 上方 4 根竹节连成 W，下方 4 根连成 M。
+ * 每条竹节用深绿描边 + 亮绿管身的双线勾勒，圆头圆角。
+ */
 function eightTiao() {
-  const w = 9;
-  const h = 33;
-  const cyTop = AREA_T + AREA_H * 0.28;
-  const cyBot = AREA_B - AREA_H * 0.28;
-  const xs = [0, 1, 2, 3].map((i) => AREA_L + (i + 0.5) * AREA_W / 4);
-  const ang = [-16, -6, 6, 16]; // 上排张角，下排取反形成镜像
-  let s = '';
-  xs.forEach((x, i) => { s += cane(x, cyTop, w, h, 'green', ang[i]); });
-  xs.forEach((x, i) => { s += cane(x, cyBot, w, h, 'green', -ang[i]); });
-  return s;
+  const outer = '#0c5a24'; // 深绿描边
+  const body = '#20a24b';  // 亮绿管身
+  const shine = '#5cc07f'; // 高光
+  // W：左上→下→中上→下→右上
+  const wPath = 'M22 20 L28 54 L44 30 L60 54 L66 20';
+  // M：左下→上→中下→上→右下 (W 的上下镜像)
+  const mPath = 'M22 100 L28 66 L44 90 L60 66 L66 100';
+  const stroke = (d, color, width, opacity = 1) =>
+    `<path d="${d}" fill="none" stroke="${color}" stroke-width="${width}"`
+    + ` stroke-linecap="round" stroke-linejoin="round"${opacity < 1 ? ` opacity="${opacity}"` : ''}/>`;
+  const draw = (d) =>
+    stroke(d, outer, 11) + stroke(d, body, 6.5) + stroke(d, shine, 2, 0.55);
+  return draw(wPath) + draw(mPath);
 }
 
 /** 六筒：上方 2 枚成对，下方 2×2 四枚，中间留出明显空隙 */
