@@ -125,6 +125,13 @@ let liveDetections = [];
 let liveImageData = null;
 /** 检测循环运行标志 */
 let detectionLoopActive = false;
+/**
+ * 检测会话代数。每次 stopDetectionLoop 递增。
+ * 用于甄别"停止前发起、停止后才 resolve"的过期 in-flight 请求——
+ * 仅靠 detectionLoopActive 不够,因为停止后若立刻重启,该标志会重新变 true,
+ * 过期请求会被误认为属于新会话,把 reset 前的旧证据喂给刚清空的融合器。
+ */
+let detectionSessionId = 0;
 /** 多帧检测融合器:消除单帧识别的张数与类别抖动 */
 const fuser = new DetectionFuser();
 
@@ -152,6 +159,7 @@ function startDetectionLoop() {
 
 function stopDetectionLoop() {
   detectionLoopActive = false;
+  detectionSessionId++;
   fuser.reset();
   liveDetections = [];
   liveImageData = null;
@@ -183,6 +191,9 @@ function cropToGuideBand(imageData) {
 
 async function detectionTick() {
   if (!detectionLoopActive) return;
+  // 在任何 await 之前锁定本次调用所属的会话代数,稍后用它判断
+  // "等待 recognizer.detect() 期间会话是否已被 stopDetectionLoop 终止并重启"
+  const sessionId = detectionSessionId;
 
   // 未就绪时轻量轮询
   if (!recognizer.isLoaded || !camera.isActive || cameraVideo.videoWidth === 0) {
@@ -202,7 +213,9 @@ async function detectionTick() {
     // 只对虚线条带做推理,过滤掉框外内容
     const { cropped, yOffset } = cropToGuideBand(imageData);
     const result = await recognizer.detect(cropped);
-    if (!detectionLoopActive) return;
+    // 会话已终止,或已终止后又重启成了别的会话:这次结果是过期证据,
+    // 必须整体丢弃,否则会污染刚 reset 过的融合器,产生一副从未存在过的手牌
+    if (!detectionLoopActive || sessionId !== detectionSessionId) return;
 
     if (result.success) {
       // 把条带内的 bbox 平移回全帧坐标系,叠加层和冻结预览才能对齐
