@@ -36,6 +36,7 @@ const cameraCanvas     = $('camera-canvas');
 const cameraOverlay    = $('camera-overlay');
 const liveCountBadge   = $('live-count-badge');
 const btnConfirm       = $('btn-confirm');
+const cameraContainer  = $('camera-container');
 const modelStatusEl    = $('model-status');
 const modelStatusIcon  = modelStatusEl.querySelector('.model-status-icon');
 const modelStatusText  = modelStatusEl.querySelector('.model-status-text');
@@ -171,6 +172,10 @@ function stopDetectionLoop() {
   const ctx = cameraOverlay.getContext('2d');
   ctx.clearRect(0, 0, cameraOverlay.width, cameraOverlay.height);
   btnConfirm.disabled = true;
+  lastBadgeKey = '';
+  cameraContainer.dataset.fuseState = 'collecting';
+  btnConfirm.classList.remove('warn');
+  btnConfirm.classList.add('primary');
 }
 
 /** 引导虚线内条带占比,必须与 CSS #camera-container::after 的 inset 一致 */
@@ -279,16 +284,59 @@ window.addEventListener('orientationchange', () => {
   }, 200);
 });
 
+/** 上一次写入 badge 的内容签名,避免以 2~3 fps 反复改写 aria-live 区域 */
+let lastBadgeKey = '';
+
+/**
+ * 按融合状态渲染 badge、确认按钮与取相框颜色。
+ *
+ * badge 带 aria-live="polite",若每帧改写 textContent 读屏软件会念个不停,
+ * 因此只在内容真正变化时才碰 DOM。COLLECTING 阶段要显示进度,故签名含帧数;
+ * 其余状态不含,避免帧数递增导致的无谓重绘。
+ *
+ * @param {{state: string, tiles: Array, pending: number, frames: number}} snap
+ */
 function updateLiveBadge(snap) {
-  const n = liveDetections.length;
-  if (n === 0) {
-    liveCountBadge.textContent = '未检测到牌';
-    btnConfirm.disabled = true;
-    btnConfirm.textContent = '✔ 确认识别结果';
-  } else {
-    liveCountBadge.textContent = `实时识别: ${n} 张`;
-    btnConfirm.disabled = false;
-    btnConfirm.textContent = `✔ 确认识别 (${n} 张)`;
+  const n = snap.tiles.length;
+  const key = snap.state === FuserState.COLLECTING
+    ? `collecting|${snap.frames}`
+    : `${snap.state}|${n}|${snap.pending}`;
+  if (key === lastBadgeKey) return;
+  lastBadgeKey = key;
+
+  cameraContainer.dataset.fuseState = snap.state;
+  btnConfirm.classList.remove('primary', 'warn');
+
+  switch (snap.state) {
+    case FuserState.COLLECTING:
+      liveCountBadge.textContent = `采集中 ${snap.frames}/${fuser.config.windowSize}`;
+      btnConfirm.textContent = '✔ 确认识别结果';
+      btnConfirm.classList.add('primary');
+      btnConfirm.disabled = true;
+      break;
+
+    case FuserState.UNSTABLE:
+      liveCountBadge.textContent = snap.pending > 0
+        ? `有 ${snap.pending} 处不确定,微调角度或光线`
+        : '稳定中…';
+      btnConfirm.textContent = '✔ 确认识别结果';
+      btnConfirm.classList.add('primary');
+      btnConfirm.disabled = true;
+      break;
+
+    case FuserState.STABLE:
+      liveCountBadge.textContent = `✓ 已稳定 · ${n} 张`;
+      btnConfirm.textContent = `✔ 确认识别 (${n} 张)`;
+      btnConfirm.classList.add('primary');
+      btnConfirm.disabled = n === 0;
+      break;
+
+    case FuserState.DEGRADED:
+      liveCountBadge.textContent = '⚠️ 识别不稳定';
+      btnConfirm.textContent = `⚠️ 仍不稳定,仍要确认 (${n} 张)`;
+      btnConfirm.classList.add('warn');
+      btnConfirm.disabled = n === 0;
+      break;
   }
 }
 

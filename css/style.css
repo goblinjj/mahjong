@@ -311,6 +311,23 @@ body::before {
   box-shadow: 0 2px 8px rgba(0, 196, 154, 0.2);
 }
 
+/* Warn - Amber:识别未达稳定但允许强制确认 */
+.action-btn.warn {
+  background: linear-gradient(135deg, #e08a3c 0%, #c4702a 100%);
+  color: #fff;
+  box-shadow: 0 4px 15px rgba(224, 138, 60, 0.25), inset 0 1px 0 rgba(255,255,255,0.15);
+}
+
+.action-btn.warn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(224, 138, 60, 0.35);
+}
+
+.action-btn.warn:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: 0 2px 8px rgba(224, 138, 60, 0.2);
+}
+
 /* Danger - Red */
 .action-btn.danger {
   background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
@@ -736,16 +753,23 @@ body::before {
   z-index: 3;
 }
 
-/* 取相框上下边缘虚线,标示拍摄条带 */
+/* 取相框上下边缘虚线,标示拍摄条带。
+   颜色随融合状态变化,用户用余光就能判断该不该按,不必去读文字。 */
 #camera-container::after {
   content: '';
   position: absolute;
   inset: 0;
-  border-top: 2px dashed rgba(0, 212, 170, 0.5);
-  border-bottom: 2px dashed rgba(0, 212, 170, 0.5);
+  border-top: 2px dashed var(--band-color, rgba(0, 212, 170, 0.5));
+  border-bottom: 2px dashed var(--band-color, rgba(0, 212, 170, 0.5));
   pointer-events: none;
   z-index: 5;
+  transition: border-color 0.25s ease;
 }
+
+#camera-container[data-fuse-state='collecting'] { --band-color: rgba(255, 255, 255, 0.35); }
+#camera-container[data-fuse-state='unstable']   { --band-color: rgba(212, 165, 116, 0.75); }
+#camera-container[data-fuse-state='stable']     { --band-color: rgba(0, 212, 170, 0.9); }
+#camera-container[data-fuse-state='degraded']   { --band-color: rgba(224, 138, 60, 0.85); }
 
 /* 实时识别数量提示 */
 #live-count-badge {
