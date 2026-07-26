@@ -172,7 +172,7 @@ function stopDetectionLoop() {
   const ctx = cameraOverlay.getContext('2d');
   ctx.clearRect(0, 0, cameraOverlay.width, cameraOverlay.height);
   btnConfirm.disabled = true;
-  lastBadgeKey = '';
+  btnConfirm.textContent = '✔ 确认识别结果';
   cameraContainer.dataset.fuseState = 'collecting';
   btnConfirm.classList.remove('warn');
   btnConfirm.classList.add('primary');
@@ -284,60 +284,66 @@ window.addEventListener('orientationchange', () => {
   }, 200);
 });
 
-/** 上一次写入 badge 的内容签名,避免以 2~3 fps 反复改写 aria-live 区域 */
-let lastBadgeKey = '';
-
 /**
  * 按融合状态渲染 badge、确认按钮与取相框颜色。
  *
- * badge 带 aria-live="polite",若每帧改写 textContent 读屏软件会念个不停,
- * 因此只在内容真正变化时才碰 DOM。COLLECTING 阶段要显示进度,故签名含帧数;
- * 其余状态不含,避免帧数递增导致的无谓重绘。
+ * badge 带 aria-live="polite",读屏软件按 DOM 变更(而非内容是否真的变化)
+ * 触发朗读,所以每帧都写 textContent 会在 UNSTABLE/DEGRADED 这类文案
+ * 不随张数变化的状态下持续刷屏。做法是先算出目标文案,只有和当前已渲染的
+ * 内容不同才写入 —— 这是对渲染结果的直接比较,不会像"签名"那样因为签名
+ * 字段选错(某态签名里混进了不影响文案的字段,或漏了会影响文案的字段)
+ * 而与实际文案脱节。按钮文案/class 与取相框颜色不是 aria-live 区域,
+ * 每帧覆写没有可感知副作用,因此不加同款守卫,以免这层耦合又绕回来。
  *
  * @param {{state: string, tiles: Array, pending: number, frames: number}} snap
  */
 function updateLiveBadge(snap) {
   const n = snap.tiles.length;
-  const key = snap.state === FuserState.COLLECTING
-    ? `collecting|${snap.frames}`
-    : `${snap.state}|${n}|${snap.pending}`;
-  if (key === lastBadgeKey) return;
-  lastBadgeKey = key;
-
-  cameraContainer.dataset.fuseState = snap.state;
-  btnConfirm.classList.remove('primary', 'warn');
+  let badgeText;
+  let btnText;
+  let btnClass;
+  let disabled;
 
   switch (snap.state) {
     case FuserState.COLLECTING:
-      liveCountBadge.textContent = `采集中 ${snap.frames}/${fuser.config.windowSize}`;
-      btnConfirm.textContent = '✔ 确认识别结果';
-      btnConfirm.classList.add('primary');
-      btnConfirm.disabled = true;
+      badgeText = `采集中 ${snap.frames}/${fuser.config.windowSize}`;
+      btnText = '✔ 确认识别结果';
+      btnClass = 'primary';
+      disabled = true;
       break;
 
     case FuserState.UNSTABLE:
-      liveCountBadge.textContent = snap.pending > 0
+      badgeText = snap.pending > 0
         ? `有 ${snap.pending} 处不确定,微调角度或光线`
         : '稳定中…';
-      btnConfirm.textContent = '✔ 确认识别结果';
-      btnConfirm.classList.add('primary');
-      btnConfirm.disabled = true;
+      btnText = '✔ 确认识别结果';
+      btnClass = 'primary';
+      disabled = true;
       break;
 
     case FuserState.STABLE:
-      liveCountBadge.textContent = `✓ 已稳定 · ${n} 张`;
-      btnConfirm.textContent = `✔ 确认识别 (${n} 张)`;
-      btnConfirm.classList.add('primary');
-      btnConfirm.disabled = n === 0;
+      badgeText = `✓ 已稳定 · ${n} 张`;
+      btnText = `✔ 确认识别 (${n} 张)`;
+      btnClass = 'primary';
+      disabled = n === 0;
       break;
 
     case FuserState.DEGRADED:
-      liveCountBadge.textContent = '⚠️ 识别不稳定';
-      btnConfirm.textContent = `⚠️ 仍不稳定,仍要确认 (${n} 张)`;
-      btnConfirm.classList.add('warn');
-      btnConfirm.disabled = n === 0;
+      badgeText = '⚠️ 识别不稳定';
+      btnText = `⚠️ 仍不稳定,仍要确认 (${n} 张)`;
+      btnClass = 'warn';
+      disabled = n === 0;
       break;
   }
+
+  if (liveCountBadge.textContent !== badgeText) {
+    liveCountBadge.textContent = badgeText;
+  }
+  cameraContainer.dataset.fuseState = snap.state;
+  btnConfirm.classList.remove('primary', 'warn');
+  btnConfirm.classList.add(btnClass);
+  btnConfirm.textContent = btnText;
+  btnConfirm.disabled = disabled;
 }
 
 /**
