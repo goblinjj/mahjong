@@ -162,8 +162,8 @@ export const FuserState = {
  */
 export const DEFAULT_CONFIG = {
   windowSize: 5,          // 滑动窗口帧数
-  presentRate: 0.6,       // 出现率 ≥ 此值视为「确认存在」
-  pendingRate: 0.3,       // 出现率 < 此值视为噪声,老化删除
+  presentRate: 0.7,       // 出现率 ≥ 此值视为「确认存在」(与 windowSize 耦合)
+  pendingRate: 0.3,       // 出现率 < 此值视为噪声,老化删除(与 windowSize 耦合)
   // 类别投票胜出占比下限。取值必须避开「可达边界」:票在 windowSize=5 的
   // 窗口内聚合,两个类别只可能分成 5:0 / 4:1 / 3:2,比例只能是 1.0 / 0.8 / 0.6。
   // 取 0.6 时 `ratio >= voteRatio` 恒成立,闸门形同虚设 —— 而它要拦的正是
