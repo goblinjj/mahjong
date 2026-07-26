@@ -164,10 +164,13 @@ export const DEFAULT_CONFIG = {
   windowSize: 5,          // 滑动窗口帧数
   presentRate: 0.6,       // 出现率 ≥ 此值视为「确认存在」
   pendingRate: 0.3,       // 出现率 < 此值视为噪声,老化删除
-  // 类别投票胜出占比下限。**必须 > 0.5**:只有两个候选类别时,胜出方占比
-  // 恒 ≥ 0.5,阈值取 0.5 会让「5万/6万 各占一半」恰好通过收敛判定并静默
-  // 选一个 —— 那正是本次要消除的失败模式。
-  voteRatio: 0.6,
+  // 类别投票胜出占比下限。取值必须避开「可达边界」:票在 windowSize=5 的
+  // 窗口内聚合,两个类别只可能分成 5:0 / 4:1 / 3:2,比例只能是 1.0 / 0.8 / 0.6。
+  // 取 0.6 时 `ratio >= voteRatio` 恒成立,闸门形同虚设 —— 而它要拦的正是
+  // 「5万/6万 每帧交替」这种僵持。0.7 落在 0.6 与 0.8 之间,两侧都有余量,
+  // 语义是「5 帧里至少 4 帧一致才算收敛」。
+  // 注意:此值与 windowSize 耦合,改任何一个都要重算可达比例集合。
+  voteRatio: 0.7,
   stableFrames: 3,        // 输出连续一致所需帧数
   matchRadiusCoarse: 1.0, // 粗匹配阈值(牌宽倍数),用于估计全局位移
   matchRadiusFine: 0.4,   // 补偿后精匹配阈值(牌宽倍数)
@@ -637,8 +640,10 @@ console.log('\n=== 测试9: 检测融合 - 状态机 ===');
   const mid = fuser.push(makeFrame(OTHER13), 2000);
   assert(mid.state !== 'stable', `换牌过渡期不得报 stable, 实际=${mid.state}`);
 
+  // 过渡期旧新票各占一半时 ratio 达不到 0.7,轨迹全部落入 pending;
+  // 需喂到旧票完全出窗(第 11 帧)才会重新稳定
   let snap = mid;
-  for (let f = 6; f < 10; f++) snap = fuser.push(makeFrame(OTHER13), f * 400);
+  for (let f = 6; f < 11; f++) snap = fuser.push(makeFrame(OTHER13), f * 400);
   const got = snap.tiles.map((t) => t.tileIndex).join(',');
   assert(got === OTHER13.join(','), `旧票过期后收敛到新牌, 实际=${got}`);
   assert(snap.state === 'stable', `收敛后回到 stable, 实际=${snap.state}`);
@@ -792,6 +797,10 @@ Expected: FAIL —— `state` 恒为 `'collecting'`、`progress` 恒为 0，多�
 Task 1 的大位移 reset 是死代码，必须删除。原因：牌是周期排列的（周期 ≈ 一个牌宽），而 `matchRadiusCoarse` 正好是 1.0 个牌宽，最近邻搜索永远折叠到最近的那个周期上——实测真实位移 40px 估成 -2、80px 估成 -4、400px 估成 -20，估计值恒在 ±半周期内，`resetShiftRatio = 1.5` 牌宽永远不可能被触及。
 
 替代方案是让旧证据自然过期：类别票和 `hits` 用同一个滑动窗口。两者本就一一对应，合并成一个数组即可。
+
+**(0)** `DEFAULT_CONFIG` 中把 `voteRatio` 由 `0.6` 改为 `0.7`，并换上本任务 Step 3 config 段落里给出的新注释。原因：票一旦窗口化，5 帧窗口内两个类别只能分成 5:0 / 4:1 / 3:2，比例只能取 1.0 / 0.8 / 0.6——0.6 是可达最小值，`ratio >= 0.6` 恒成立，闸门失效。
+
+同时更新 `js/test-engine.js` 中 测试8「类别僵持」块的注释，它当前写的是 `(占比 0.5 < voteRatio 0.6)`，窗口化后实际是 `(占比 0.6 < voteRatio 0.7)`。断言本身不变。
 
 **(1)** `DEFAULT_CONFIG` 中删除 `resetShiftRatio` 一行（它已无使用者）。
 
