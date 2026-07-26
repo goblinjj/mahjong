@@ -107,18 +107,22 @@ vendor 目录名带版本号，这是缓存失效机制，不是装饰。升级�
 
 推理在裁剪后的条带坐标系里进行，`detectionTick` 会把 bbox 的 `y` 加回 `yOffset` 还原到全帧坐标，叠加层再线性缩放绘制。
 
+另有一处不影响对位、但同样是跨文件耦合的：`css/style.css` 的 `#camera-container[data-fuse-state='…']` 四条规则由 `app.js` 的 `updateLiveBadge` 写入，取值必须与 `detection-fuser.js` 的 `FuserState` 完全一致。写错不会报错，只是虚线颜色不变。
+
 ### 识别结果必须经过多帧融合，不能直接用单帧
 
 单帧 YOLO 在置信度阈值附近会闪，13 张牌会在 12/13 之间跳动、类别会在相邻两张之间跳变。`recognition.js` 的 `confThreshold` 因此**刻意设为 0.3 而非常规的 0.5**——先把弱证据放进来，再由 `detection-fuser.js` 用多帧出现率把噪声滤出去。**单独调高阈值而不动融合器，或者绕过融合器直接用 `detect()` 的结果，都会让抖动回归。**
 
 `app.js` 的 `detectionTick` 把原始检测喂给模块级的 `fuser`，用返回快照的 `tiles` 赋给 `liveDetections`。融合器的输出结构与原始检测完全一致，因此 `drawOverlay`、确认流程、预览页都不感知它的存在。
 
-四个容易踩的点：
+五个容易踩的点：
 
 - **`stopDetectionLoop()` 必须调 `fuser.reset()`**，否则上一副牌的投票会污染下一副，用户会拿到一副从未存在过的手牌。
 - **fuser 不得引用任何 DOM/浏览器 API**，时间由 `push(detections, now)` 的第二个参数传入。这是它能在 `js/test-engine.js` 里被 node 测试的前提——融合逻辑无法靠对着摄像头肉眼调准。
 - **「待定」轨迹不进输出但会阻止 stable**。这是有意的：静默补一张类别没收敛的牌，比少一张更坏。持续 8 秒不稳定会降级为 DEGRADED 解锁强制确认，否则光线差时按钮永远不亮。
-- **`DEFAULT_CONFIG` 里的比率阈值不能取到「可达值」上**。`presentRate` / `pendingRate` / `voteRatio` 都是在 `windowSize` 帧的窗口内算出来的，取值集合是离散的：5 帧窗口下出现率只能是 0.2/0.25/0.333/0.4/0.5/0.6/0.667/0.75/0.8/1.0，两类投票占比只能是 0.6/0.8/1.0。**阈值一旦等于某个可达值，判据就恒真或恒假，闸门静默失效且不报错。** 本项目已经因此栽过三次（位移 reset 阈值、`voteRatio`、`presentRate`），所以 `presentRate` 与 `voteRatio` 都取 0.7 这种「落在两个可达值之间」的数。**改动 `windowSize` 或任何一个比率阈值，都必须重算可达值集合。**
+- **`DEFAULT_CONFIG` 里的比率阈值不能取到「可达值」上**。`presentRate` / `pendingRate` / `voteRatio` 都是在 `windowSize` 帧的窗口内算出来的，取值集合是离散的：5 帧窗口下出现率只能是 0.2/0.25/0.333/0.4/0.5/0.6/0.667/0.75/0.8/1.0。投票占比因为按置信度加权、理论上连续，但**各帧置信度接近时会紧贴同一组离散值**（两类之争是 0.6/0.8/1.0），实践中照样会卡在边界上。**阈值一旦等于某个可达值，判据就恒真或恒假，闸门静默失效且不报错。** 本项目已经因此栽过三次（位移 reset 阈值、`voteRatio`、`presentRate`），所以 `presentRate` 与 `voteRatio` 都取 0.7 这种「落在两个可达值之间」的数。**改动 `windowSize` 或任何一个比率阈值，都必须重算可达值集合。**
+
+- **`updateLiveBadge` 的 switch 必须与 `FuserState` 同步**，和 `renderResult` 必须与 `analyzeHand` 的判别联合同步是同一类约束。新增状态而不更新它，UI 会静默停在上一个状态。
 
 所有阈值集中在 `detection-fuser.js` 的 `DEFAULT_CONFIG`，真机调参只改那一处。
 

@@ -147,7 +147,15 @@ async function startCamera() {
     liveCountBadge.textContent = '摄像头不可用';
     return;
   }
+  // getUserMedia 期间用户可能已经切走。camera.stop() 那时看到的 stream 还是
+  // null(尚未赋值)会直接空转,等这里 resolve 后摄像头反而被点亮并开始推理 ——
+  // 表现为人已在手动选牌页,指示灯却还亮着。用会话代数把这条路也堵上。
+  const sessionId = detectionSessionId;
   const ok = await camera.start(cameraVideo, cameraCanvas);
+  if (sessionId !== detectionSessionId) {
+    camera.stop();
+    return;
+  }
   if (!ok) {
     updateModelStatus('warn', '摄像头启动失败。请检查权限，或改用手动选牌模式。');
     liveCountBadge.textContent = '摄像头启动失败';
@@ -278,10 +286,19 @@ cameraVideo.addEventListener('resize', () => {
   if (detectionLoopActive) drawOverlay();
 });
 window.addEventListener('orientationchange', () => {
+  // 旋转后轨迹留在旧坐标系里,虽然几帧内会自然老化掉,但直接作废更干净
+  fuser.reset();
   setTimeout(() => {
     ensureContainerAspect();
     if (detectionLoopActive) drawOverlay();
   }, 200);
+});
+
+// 切后台/锁屏时立刻作废已累积的证据。融合器内部也有陈旧帧流检测兜底,
+// 但那要等下一帧才生效;而回到前台时用户很可能已经换了牌,让旧证据活着
+// 会给出一副新旧混合、却仍可确认的手牌。
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) fuser.reset();
 });
 
 /**
@@ -306,16 +323,21 @@ function updateLiveBadge(snap) {
 
   switch (snap.state) {
     case FuserState.COLLECTING:
-      badgeText = `采集中 ${snap.frames}/${fuser.config.windowSize}`;
+      // 分母是 minFramesForState 而非 windowSize:COLLECTING 在攒够
+      // minFramesForState 帧时就结束,用 windowSize 会显示到 2/5 就跳走
+      badgeText = `采集中 ${snap.frames}/${fuser.config.minFramesForState}`;
       btnText = '✔ 确认识别结果';
       btnClass = 'primary';
       disabled = true;
       break;
 
     case FuserState.UNSTABLE:
-      badgeText = snap.pending > 0
-        ? `有 ${snap.pending} 处不确定,微调角度或光线`
-        : '稳定中…';
+      // 一张都没检出时说「稳定中」会误导(暗示正在收敛),要明确告诉用户没看到牌
+      badgeText = n === 0 && snap.pending === 0
+        ? '未检测到牌，请把牌放进虚线框'
+        : snap.pending > 0
+          ? `有 ${snap.pending} 处不确定,微调角度或光线`
+          : '稳定中…';
       btnText = '✔ 确认识别结果';
       btnClass = 'primary';
       disabled = true;
@@ -329,7 +351,9 @@ function updateLiveBadge(snap) {
       break;
 
     case FuserState.DEGRADED:
-      badgeText = '⚠️ 识别不稳定';
+      badgeText = n === 0 && snap.pending === 0
+        ? '未检测到牌，请把牌放进虚线框'
+        : '⚠️ 识别不稳定';
       btnText = `⚠️ 仍不稳定,仍要确认 (${n} 张)`;
       btnClass = 'warn';
       disabled = n === 0;
@@ -343,6 +367,9 @@ function updateLiveBadge(snap) {
   btnConfirm.classList.remove('primary', 'warn');
   btnConfirm.classList.add(btnClass);
   btnConfirm.textContent = btnText;
+  // index.html 上的静态 aria-label 会盖住可见文案,读屏用户在 DEGRADED 下
+  // 只会听到"确认识别结果",完全听不出结果不可信。这里跟着一起更新。
+  btnConfirm.setAttribute('aria-label', btnText);
   btnConfirm.disabled = disabled;
 }
 

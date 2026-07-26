@@ -467,6 +467,76 @@ console.log('\n=== 测试9: 检测融合 - 状态机 ===');
 }
 
 // ============================================================
+console.log('\n=== 测试10: 检测融合 - 回归防护 ===');
+// ============================================================
+
+/**
+ * 构造一行「整体倾斜 deg 度」的牌：沿行方向线性升降底边。
+ * 手持拍摄几乎不可能与牌排平行,这是常态而非边缘情况。
+ */
+function makeTiltedFrame(tileIndexes, deg) {
+  const rad = (deg * Math.PI) / 180;
+  const w = 40, h = 56, gap = 42, x0 = 100, y0 = 200;
+  const centerX = x0 + ((tileIndexes.length - 1) / 2) * gap;
+  return tileIndexes.map((tileIndex, i) => {
+    const x = x0 + i * gap;
+    return {
+      tileIndex,
+      confidence: 0.8,
+      bbox: { x, y: y0 + (x - centerX) * Math.tan(rad), w, h },
+    };
+  });
+}
+
+// 倾斜 15 度仍须报满 13 张。
+// 回归的是:离群剔除在建轨之前发生,被误删的牌永远不会变成 pending,
+// 于是界面会亮着绿灯稳定地少报牌数 —— 比抖动更坏。
+{
+  const fuser = new DetectionFuser();
+  let snap;
+  for (let f = 0; f < 6; f++) snap = fuser.push(makeTiltedFrame(HAND13, 15), f * 400);
+  assert(snap.tiles.length === 13, `倾斜 15° 仍报满 13 张, 实际=${snap.tiles.length}`);
+}
+
+// 但明显偏离基线的整尺寸幽灵框仍须被剔除(容差不能放得太松)
+{
+  const fuser = new DetectionFuser();
+  let snap;
+  for (let f = 0; f < 6; f++) {
+    const frame = makeTiltedFrame(HAND13, 0);
+    frame.push({ tileIndex: 5, confidence: 0.9, bbox: { x: 900, y: 360, w: 40, h: 56 } });
+    snap = fuser.push(frame, f * 400);
+  }
+  assert(snap.tiles.length === 13, `远离基线的幽灵框仍被剔除, 实际=${snap.tiles.length}`);
+}
+
+// 新生轨迹首帧不得直接算「确认存在」。
+// 回归的是:_rate 对新生轨迹用短分母,首帧出现率即 1.0,单帧噪声框会直接
+// 进输出;STABLE 有连续帧数兜住,DEGRADED 没有。
+{
+  const fuser = new DetectionFuser();
+  let snap;
+  for (let f = 0; f < 6; f++) {
+    const frame = makeTiltedFrame(HAND13, 0);
+    if (f === 5) frame.push({ tileIndex: 5, confidence: 0.35, bbox: { x: 900, y: 200, w: 40, h: 56 } });
+    snap = fuser.push(frame, f * 400);
+  }
+  assert(snap.tiles.length === 13, `单帧新生框不进输出, 实际=${snap.tiles.length}`);
+  assert(snap.pending === 1, `未成熟轨迹计入 pending 并阻止稳定, 实际=${snap.pending}`);
+}
+
+// 帧流长时间中断(切后台/锁屏)后恢复,旧证据必须作废。
+// 回归的是:降级计时器用墙钟且跨中断存活,而证据窗口按帧计不衰减,
+// 回到前台首帧就可能给出一副新旧混合、却仍可确认的手牌。
+{
+  const fuser = new DetectionFuser();
+  for (let f = 0; f < 6; f++) fuser.push(makeTiltedFrame(HAND13, 0), f * 400);
+  const snap = fuser.push(makeTiltedFrame(HAND13, 0), 400000);
+  assert(snap.frames === 1, `中断后帧计数归零, 实际=${snap.frames}`);
+  assert(snap.state === 'collecting', `中断后回到 collecting, 实际=${snap.state}`);
+}
+
+// ============================================================
 console.log('\n=== 测试结果 ===');
 console.log(`通过: ${passed}, 失败: ${failed}`);
 if (failed > 0) {
