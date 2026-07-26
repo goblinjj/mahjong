@@ -36,14 +36,31 @@ export const DEFAULT_CONFIG = {
                            // 会周期性把幻影框误判为确认存在。0.7 落在可达值
                            // 0.667 与 0.75 之间,两侧都有余量。
   pendingRate: 0.3,       // 出现率 < 此值视为噪声,老化删除
-  voteRatio: 0.7,         // 类别投票胜出占比下限。窗口内两个候选类别只能
-                           // 分成 5:0/4:1/3:2,比例只能取 1.0/0.8/0.6 ——
-                           // 0.7 落在可达值 0.6 与 0.8 之间,意味着「5 帧里
-                           // 至少 4 帧同类」。
+  voteRatio: 0.7,         // 类别投票胜出占比下限。票是按置信度加权的,所以
+                           // ratio 本身取值连续;但在各帧置信度相近(实际情况)
+                           // 时它会贴近等权可达值:窗口内两个候选类别只能分成
+                           // 5:0/4:1/3:2,等权比例只能取 1.0/0.8/0.6 —— 0.7 落在
+                           // 0.6 与 0.8 之间,意味着「5 帧里至少 4 帧同类」,
+                           // 且不与任何等权可达值相等。
+  // 一条轨迹至少要命中这么多帧才可能算「确认存在」。1 是危险的:_rate() 对
+  // 新生轨迹用短分母(见其注释),出生当帧出现率就是 1/1=1.0、投票占比也是
+  // 1.0,单个幻影框会立刻被算作一张牌。STABLE 有「输出连续一致」兜底,
+  // DEGRADED 没有 —— 而 DEGRADED 恰恰是检测最脏时走的那条路。
+  // 这是对整数计数的比较(hits.length ∈ {1..windowSize}),阈值取到可达值
+  // 是有意的:2 就是要把「只有 1 帧证据」这一档挡在外面。
+  minHitsForPresent: 2,
   stableFrames: 3,        // 输出连续一致所需帧数
-  matchRadiusCoarse: 1.0, // 粗匹配阈值(牌宽倍数),用于估计全局位移
+  // 粗匹配阈值(牌宽倍数),用于估计全局位移。注意:对一行紧密排列的牌,
+  // 这道闸门是「常开」的 —— 详见 _estimateShift 里的说明。
+  matchRadiusCoarse: 1.0,
   matchRadiusFine: 0.4,   // 补偿后精匹配阈值(牌宽倍数)
   degradeAfterMs: 8000,   // 持续不稳定多久后降级
+  // 相邻两帧时间戳相差超过此值,视为帧流中断(页面被切到后台、锁屏、
+  // 系统挂起),累积的证据已经不可信 —— 回来时镜头很可能对着另一副牌、
+  // 另一个位置,旧轨迹与新检测混在一起会拼出一副从未存在过的手牌。
+  // 实测节奏 2~3 fps(帧间隔 300~500ms),低端机再慢也在 1.5s 内,
+  // 3s 与正常帧间隔拉开一个数量级,不会被慢机器误触发。
+  staleFrameGapMs: 3000,
   // 有 pending 轨迹、或本帧一张确认存在的牌都没有时,进度条封顶于此 ——
   // 前者再攒多少帧也不会稳定,后者对着空气也不该显示满格,都是错误信号。
   pendingProgressCap: 0.99,
@@ -52,7 +69,18 @@ export const DEFAULT_CONFIG = {
   outlierMinBoxes: 4,     // 少于此框数不做离群剔除(中位数不可靠)
   outlierHeightLo: 0.6,   // 高度低于中位数此倍数 → 剔除
   outlierHeightHi: 1.6,   // 高度高于中位数此倍数 → 剔除
-  outlierBaseline: 0.5,   // 底边偏离基线中位数超过此倍数牌高 → 剔除
+  // 底边偏离基线中位数超过此倍数牌高 → 剔除。这道闸门是**故意放得很松**的:
+  // 它拿每个框的底边和「底边中位数」(一条水平线)比,而牌行在画面里只要
+  // 有倾角 θ,偏离量就随着离行中心的距离线性增长 —— 手牌越长,能容忍的
+  // 角度越小。0.5 时 13 张牌只能容忍约 6°,而手持手机很少正好摆在 6° 以内,
+  // 一倾斜两端的牌就被剔掉,又因为剔除发生在建轨迹之前,这些牌根本不会
+  // 变成 pending、也就拦不住 STABLE —— 结果是给 13 张牌打出绿色的
+  // 「✓ 已稳定 · 9 张」,正是本模块最要避免的失效。2.0 把容忍角放宽到 20° 以上,
+  // 同时一个满尺寸、离行 160px 的幻影框(160 > 2.0×56)仍会被拦下。
+  // 真正畸形的框由上面的高度闸门负责,不指望这一条。
+  // (根治办法是对 (cx, y+h) 做最小二乘拟合、按到直线的残差判定,因为基线
+  // 本来就是一条直线而非一个水平常数;当前只是把阈值放松到不误伤的量级。)
+  outlierBaseline: 2.0,
 };
 
 /** 中位数;会就地排序传入数组的副本 */
@@ -91,7 +119,15 @@ export class DetectionFuser {
     this.reset();
   }
 
-  /** 清空全部累积证据。换牌、切模式、大幅移动后必须调用。 */
+  /**
+   * 清空全部累积证据。切模式、结束一次识别会话、页面被切到后台时必须调用。
+   *
+   * 没有「移动多少像素就自动 reset」这样的触发器 —— 那条规则曾经存在,
+   * 因为它的阈值恰好卡在可达值上而被删掉了。取而代之的是投票自然过期:
+   * 轨迹只保留最近 windowSize 帧的命中(见 _ageOut),旧票会随窗口滑出,
+   * 换牌/移动后旧证据自己会消失,过渡期里轨迹落在 pending 挡住 STABLE。
+   * 唯一需要外部/内部显式 reset 的是「帧流断了」的情形,见 staleFrameGapMs。
+   */
   reset() {
     /** @type {Array<object>} 活跃轨迹 */
     this.tracks = [];
@@ -102,10 +138,12 @@ export class DetectionFuser {
     this._lastSig = null;
     /** 输出连续一致的帧数 */
     this._consistent = 0;
-    /** 进入 UNSTABLE 的时间戳(ms);0 表示当前不处于 UNSTABLE */
-    this._unstableSince = 0;
+    /** 进入 UNSTABLE 的时间戳(ms);null 表示当前不处于 UNSTABLE */
+    this._unstableSince = null;
     /** 最近一次 push 传入的时间戳 */
     this._now = 0;
+    /** 上一帧 push 的时间戳;null 表示 reset 后还没有过任何一帧 */
+    this._lastPushAt = null;
     /** 本帧是否出现「检测类别与轨迹既有胜出类别不符」 */
     this._conflict = false;
     /**
@@ -122,6 +160,15 @@ export class DetectionFuser {
    * @returns {{state:string, tiles:Array, pending:number, frames:number, progress:number}}
    */
   push(detections, now = 0) {
+    // 帧流断过就把证据全部作废。降级计时器用的是墙钟时间,而证据窗口按帧计,
+    // 页面被切到后台时帧不再来、证据不会衰减,墙钟却一直在走 —— 回来的第一帧
+    // 就可能直接判成 DEGRADED,并把旧牌与新牌拼在一起输出。
+    // reset() 会把 _lastPushAt 清成 null,所以 reset 后的第一帧不会被当成断流。
+    if (this._lastPushAt !== null && now - this._lastPushAt >= this.config.staleFrameGapMs) {
+      this.reset();
+    }
+    this._lastPushAt = now;
+
     const dets = rejectOutliers(detections || [], this.config);
     const tileW = this._tileWidth(dets);
 
@@ -157,9 +204,16 @@ export class DetectionFuser {
    * 把轨迹按出现率与类别收敛度分三档。纯函数,不修改任何状态,可被
    * push() 或测试反复调用而不影响结果。
    *
-   *   确认存在(出现率 ≥ presentRate 且投票占比 ≥ voteRatio) → 计入 tiles
-   *   待定(出现率在 [pendingRate, presentRate),或投票未收敛)  → 计入 pending
+   *   确认存在(命中 ≥ minHitsForPresent 帧、出现率 ≥ presentRate
+   *            且投票占比 ≥ voteRatio) → 计入 tiles
+   *   待定(证据不足以确认,但出现率还没跌到噪声线)              → 计入 pending
    *   噪声(出现率 < pendingRate) → 已在 _ageOut 中删除
+   *
+   * 「命中帧数」这一条独立于出现率:_rate() 对新生轨迹用短分母(那是为了
+   * 「存活」判定,不让刚出生的轨迹被当噪声删掉),代价是出生当帧出现率恒为
+   * 1.0。若不另加帧数下限,一个单帧幻影框会在出生那一帧就被算成一张牌。
+   * 未成熟的轨迹并入「待定」而不是静默丢弃,才能在 pending 里被看见并挡住
+   * STABLE —— 静默补一张来路不明的牌,比少一张更坏。
    *
    * 「待定」这一档是有意的:降低置信度阈值后必然出现若隐若现的框,若只做
    * 二分,它们要么污染结果、要么被静默丢弃 —— 静默丢弃正是「一会儿 12 张」
@@ -167,13 +221,14 @@ export class DetectionFuser {
    * 知道该调整角度或光线。
    */
   _classify() {
-    const { presentRate, voteRatio } = this.config;
+    const { presentRate, voteRatio, minHitsForPresent } = this.config;
     const present = [];
     let pending = 0;
 
     for (const t of this.tracks) {
       const vote = this._bestVote(t);
-      if (this._rate(t) >= presentRate && vote.ratio >= voteRatio) {
+      const mature = t.hits.length >= minHitsForPresent;
+      if (mature && this._rate(t) >= presentRate && vote.ratio >= voteRatio) {
         present.push({ track: t, vote });
       } else {
         pending++;
@@ -221,13 +276,13 @@ export class DetectionFuser {
 
     // 持续不稳定太久则降级,否则光线差的场景下按钮永远不亮,功能直接不可用
     if (state === FuserState.UNSTABLE) {
-      if (this._unstableSince === 0) {
+      if (this._unstableSince === null) {
         this._unstableSince = this._now;
       } else if (this._now - this._unstableSince >= degradeAfterMs) {
         state = FuserState.DEGRADED;
       }
     } else {
-      this._unstableSince = 0;
+      this._unstableSince = null;
     }
 
     // 进度取「帧数」与「连续一致帧数」两个分量的较小值。
@@ -254,9 +309,21 @@ export class DetectionFuser {
    * 估计整行的全局位移(手抖导致的平移)。
    * 用宽松阈值粗匹配后取位移中位数 —— 中位数抗离群,个别错配不影响补偿量。
    * 这比陀螺仪更直接:它测的是牌在画面里实际移动了多少像素。
+   *
+   * 关于下面的 `bestD <= limit`(matchRadiusCoarse × 牌宽):对一行紧密排列的
+   * 牌,**这道闸门永远不会触发**,不要把它当成一道活的防线。行是周期结构
+   * (周期 = 牌间距),位移多大都会混叠到「不超过半个周期」的最近邻距离上,
+   * 而半个周期恒小于 1.0 × 牌宽。因此:
+   *   - 位移补偿真正买到的容忍度,是 matchRadiusFine×牌宽 到半个周期之间
+   *     (实测:每帧漂移 20px 仍能跟住,22px 就散架;不做补偿只能扛到 16px);
+   *   - 超过半个周期后,估计值会混叠成一个「自信而错误」的位移,轨迹整体错位
+   *     一张牌。挡住它的不是这里,而是下游的类别冲突闸门(_hit 里的
+   *     this._conflict)和「输出连续一致 stableFrames 帧」的要求。
+   * 保留这个判据是为了行数很少、不成周期结构时(如只识出两三张)仍有约束。
    */
   _estimateShift(dets, tileW) {
     if (this.tracks.length === 0 || dets.length === 0) return null;
+    // 见上:紧密排列的一行里,这个 limit 恒不生效
     const limit = this.config.matchRadiusCoarse * tileW;
     const dxs = [];
     const dys = [];
