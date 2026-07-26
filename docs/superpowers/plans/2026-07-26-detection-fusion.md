@@ -568,7 +568,7 @@ git commit -m "多帧融合:出现率三态分档与类别加权投票
 
 ---
 
-## Task 3: 状态机、progress、大位移 reset 与降级超时
+## Task 3: 状态机、progress、票窗口化与降级超时
 
 **Files:**
 - Modify: `js/detection-fuser.js`（`reset()`、`push()`、`snapshot()`）
@@ -626,14 +626,22 @@ console.log('\n=== 测试9: 检测融合 - 状态机 ===');
   assert(snap.state !== 'stable', `类别持续跳变不得进入 stable, 实际=${snap.state}`);
 }
 
-// 整行平移超过 1.5 个牌宽 → 触发 reset,帧计数归零
+// 场景切换:换一副牌(位置不变、类别全变)。旧票应随窗口自然过期,
+// 收敛到新牌;过渡期间不得报 stable(否则会绿灯给出旧手牌)。
 {
+  const OTHER13 = [4, 5, 6, 13, 14, 15, 22, 23, 24, 28, 28, 33, 32];
   const fuser = new DetectionFuser();
   for (let f = 0; f < 5; f++) fuser.push(makeFrame(HAND13), f * 400);
-  // 牌宽 40,平移 80px = 2 个牌宽 > 1.5
-  const snap = fuser.push(makeFrame(HAND13, { x0: 180 }), 2000);
-  assert(snap.frames === 1, `大位移触发 reset,帧计数归零后本帧计 1, 实际=${snap.frames}`);
-  assert(snap.state === 'collecting', `reset 后回到 collecting, 实际=${snap.state}`);
+
+  // 换牌后第 1 帧:旧票仍占多数,但本帧存在类别冲突 → 不得 stable
+  const mid = fuser.push(makeFrame(OTHER13), 2000);
+  assert(mid.state !== 'stable', `换牌过渡期不得报 stable, 实际=${mid.state}`);
+
+  let snap = mid;
+  for (let f = 6; f < 10; f++) snap = fuser.push(makeFrame(OTHER13), f * 400);
+  const got = snap.tiles.map((t) => t.tileIndex).join(',');
+  assert(got === OTHER13.join(','), `旧票过期后收敛到新牌, 实际=${got}`);
+  assert(snap.state === 'stable', `收敛后回到 stable, 实际=${snap.state}`);
 }
 
 // 持续不稳定超过 8 秒 → 降级为 degraded,输出仍只含确认存在的轨迹
@@ -775,6 +783,94 @@ Expected: FAIL —— `state` 恒为 `'collecting'`、`progress` 恒为 0，多�
 ```js
     /** 最近一次 push 传入的时间戳 */
     this._now = 0;
+    /** 本帧是否出现「检测类别与轨迹既有胜出类别不符」 */
+    this._conflict = false;
+```
+
+**3e. 把类别票改为滑动窗口，并删掉失效的大位移 reset。**
+
+Task 1 的大位移 reset 是死代码，必须删除。原因：牌是周期排列的（周期 ≈ 一个牌宽），而 `matchRadiusCoarse` 正好是 1.0 个牌宽，最近邻搜索永远折叠到最近的那个周期上——实测真实位移 40px 估成 -2、80px 估成 -4、400px 估成 -20，估计值恒在 ±半周期内，`resetShiftRatio = 1.5` 牌宽永远不可能被触及。
+
+替代方案是让旧证据自然过期：类别票和 `hits` 用同一个滑动窗口。两者本就一一对应，合并成一个数组即可。
+
+**(1)** `DEFAULT_CONFIG` 中删除 `resetShiftRatio` 一行（它已无使用者）。
+
+**(2)** `push()` 中删除大位移 reset 分支，只保留位移补偿。小位移的估计是准确的（8px 估成 8、20px 估成 20），手抖补偿仍然有效，必须保留。改成：
+
+```js
+    const shift = this._estimateShift(dets, tileW);
+    if (shift) {
+      for (const t of this.tracks) {
+        t.cx += shift.dx;
+        t.cy += shift.dy;
+      }
+    }
+
+    this._now = now;
+    this._conflict = false;
+    this.frameSeq++;
+```
+
+**(3)** 轨迹用一个数组同时承载命中与投票。`_newTrack` 中把 `hits` 与 `votes` 两个字段替换为：
+
+```js
+      hits: [{ frame: this.frameSeq, tileIndex: det.tileIndex, conf: det.confidence }],
+```
+
+**(4)** `_hit()` 中把 `track.hits.push(...)` 与 `track.votes.set(...)` 两行替换为下面这段。冲突检测必须在追加本帧票**之前**做，否则本帧的票会参与到「既有胜出类别」的计算里，冲突就永远测不出来：
+
+```js
+    // 与既有胜出类别不符 → 记录冲突。仅在轨迹已有历史时判定,
+    // 新生轨迹只有一票,无所谓「既有胜出类别」。
+    if (track.hits.length > 1 && this._bestVote(track).tileIndex !== det.tileIndex) {
+      this._conflict = true;
+    }
+    track.hits.push({ frame: this.frameSeq, tileIndex: det.tileIndex, conf: det.confidence });
+```
+
+**(5)** `_ageOut()` 的裁剪改为按记录的 `frame` 字段：
+
+```js
+      t.hits = t.hits.filter((h) => h.frame > this.frameSeq - windowSize);
+```
+
+**(6)** `_bestVote()` 改为在窗口内的 `hits` 上聚合，不再读 `track.votes`：
+
+```js
+  _bestVote(track) {
+    const weights = new Map();
+    let total = 0;
+    for (const h of track.hits) {
+      weights.set(h.tileIndex, (weights.get(h.tileIndex) || 0) + h.conf);
+      total += h.conf;
+    }
+    let bestIndex = -1;
+    let bestWeight = 0;
+    for (const [tileIndex, weight] of weights) {
+      if (weight > bestWeight) {
+        bestWeight = weight;
+        bestIndex = tileIndex;
+      }
+    }
+    const hits = track.hits.length || 1;
+    return {
+      tileIndex: bestIndex,
+      ratio: total > 0 ? bestWeight / total : 0,
+      confidence: Math.min(1, bestWeight / hits),
+    };
+  }
+```
+
+**(7)** `_judge()` 中，把 STABLE 的判定条件加上「本帧无类别冲突」。窗口化留下一个 1~2 帧的缺口：换牌后旧票仍暂时占多数，若不拦，fuser 会绿灯报出**旧手牌**——正是设计文档说的「比少一张更坏」。把这一行：
+
+```js
+    } else if (pending === 0 && tiles.length > 0 && this._consistent >= stableFrames) {
+```
+
+改为：
+
+```js
+    } else if (!this._conflict && pending === 0 && tiles.length > 0 && this._consistent >= stableFrames) {
 ```
 
 - [ ] **Step 4: 运行测试确认通过**
@@ -786,11 +882,12 @@ Expected: PASS —— 测试7、8、9 全部 ✅，失败数 0
 
 ```bash
 git add js/detection-fuser.js js/test-engine.js
-git commit -m "多帧融合:状态机、大位移 reset 与降级兜底
+git commit -m "多帧融合:状态机、票窗口化与降级兜底
 
-STABLE 需同时满足无待定、类别收敛、输出连续 3 帧一致。位移超过 1.5
-牌宽视为换牌并作废旧证据。持续不稳定 8s 降级解锁强制确认,避免光线差
-时按钮永远不亮。"
+STABLE 需同时满足无待定、类别收敛、无本帧类别冲突、输出连续 3 帧一致。
+类别票与 hits 共用滑动窗口,换牌后旧证据自然过期 —— 原本基于位移中位数
+的 reset 是死代码:牌周期排列且粗匹配半径等于周期,估计值恒落在 ±半周期
+内,1.5 牌宽的阈值永远触不到。持续不稳定 8s 降级解锁强制确认。"
 ```
 
 ---
