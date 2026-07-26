@@ -8,6 +8,7 @@
 
 import { createHand, isWinningHand, getTenpaiTiles, getShanten, TILE_NAMES, WILD_TILE } from './mahjong-engine.js';
 import { analyzeHand } from './analyzer.js';
+import { DetectionFuser } from './detection-fuser.js';
 
 let passed = 0;
 let failed = 0;
@@ -220,6 +221,71 @@ console.log('\n=== 测试6: 向听数分析 ===');
     assert(result.shanten >= 1, `未听牌手牌 shanten ≥ 1, 实际=${result.shanten}`);
     console.log(`  最优打法: 打「${result.discards[0].tileName}」→ 进张 ${result.discards[0].ukeire.length} 种`);
   }
+}
+
+// ============================================================
+console.log('\n=== 测试7: 检测融合 - 轨迹关联 ===');
+// ============================================================
+
+/**
+ * 构造一帧合成检测：一行等间距、等大小的牌。
+ * 中心间距 42 > 牌宽 40，确保相邻牌不会被互相匹配。
+ * @param {number[]} tileIndexes
+ * @param {{x0?:number, y0?:number, w?:number, h?:number, gap?:number, conf?:number}} [opts]
+ */
+function makeFrame(tileIndexes, opts = {}) {
+  const { x0 = 100, y0 = 200, w = 40, h = 56, gap = 42, conf = 0.8 } = opts;
+  return tileIndexes.map((tileIndex, i) => ({
+    tileIndex,
+    confidence: conf,
+    bbox: { x: x0 + i * gap, y: y0, w, h },
+  }));
+}
+
+/** 一副 13 张的测试手牌 */
+const HAND13 = [0, 1, 2, 9, 10, 11, 18, 19, 20, 27, 27, 32, 33];
+
+// 连续 5 帧完全相同 → 应恰好产生 13 条轨迹，不多不少
+{
+  const fuser = new DetectionFuser();
+  let snap;
+  for (let f = 0; f < 5; f++) snap = fuser.push(makeFrame(HAND13), f * 400);
+  assert(snap.tiles.length === 13, `5 帧相同输入产生 13 条轨迹, 实际=${snap.tiles.length}`);
+  assert(snap.frames === 5, `帧计数为 5, 实际=${snap.frames}`);
+}
+
+// 第 3 帧漏掉第 7 张 → 轨迹不应消失(出现率分档在任务 2,这里只验证关联)
+{
+  const fuser = new DetectionFuser();
+  let snap;
+  for (let f = 0; f < 5; f++) {
+    const frame = makeFrame(HAND13);
+    if (f === 2) frame.splice(6, 1);   // 抽掉第 7 张,其余位置不变
+    snap = fuser.push(frame, f * 400);
+  }
+  assert(snap.tiles.length === 13, `单帧漏检不丢轨迹, 实际=${snap.tiles.length}`);
+}
+
+// 整行每帧右移 8px(手抖) → 位移补偿后不应产生新轨迹
+{
+  const fuser = new DetectionFuser();
+  let snap;
+  for (let f = 0; f < 5; f++) {
+    snap = fuser.push(makeFrame(HAND13, { x0: 100 + f * 8 }), f * 400);
+  }
+  assert(snap.tiles.length === 13, `整行平移不产生新轨迹, 实际=${snap.tiles.length}`);
+}
+
+// 离群框剔除:混入一个高度只有一半、且不在基线上的框
+{
+  const fuser = new DetectionFuser();
+  let snap;
+  for (let f = 0; f < 5; f++) {
+    const frame = makeFrame(HAND13);
+    frame.push({ tileIndex: 5, confidence: 0.9, bbox: { x: 700, y: 120, w: 40, h: 20 } });
+    snap = fuser.push(frame, f * 400);
+  }
+  assert(snap.tiles.length === 13, `离群框被剔除, 实际=${snap.tiles.length}`);
 }
 
 // ============================================================
