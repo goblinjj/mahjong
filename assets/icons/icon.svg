@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <!-- PWA 图标源文件。内容收在中心 ~62% 内，同时满足 maskable 安全区要求。
+       用 npm run icons 生成各尺寸 PNG。 -->
+  <defs>
+    <radialGradient id="glow" cx="50%" cy="42%" r="58%">
+      <stop offset="0%" stop-color="#12513a"/>
+      <stop offset="100%" stop-color="#0a1a10"/>
+    </radialGradient>
+    <linearGradient id="ivory" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#f7f3e9"/>
+      <stop offset="100%" stop-color="#ded4c2"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="512" height="512" fill="url(#glow)"/>
+
+  <!-- 八条牌：88×120 原始比例，缩放 2.2727 后居中 -->
+  <g transform="translate(156 113) scale(2.2727)">
+    <rect width="88" height="120" rx="9" fill="url(#ivory)"/>
+    <rect x="1.2" y="1.2" width="85.6" height="117.6" rx="8" fill="none" stroke="#c8b89a" stroke-width="1.2" opacity="0.7"/>
+    <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M22 20 L28 54 L44 30 L60 54 L66 20" stroke="#0c5a24" stroke-width="11"/>
+      <path d="M22 20 L28 54 L44 30 L60 54 L66 20" stroke="#20a24b" stroke-width="6.5"/>
+      <path d="M22 20 L28 54 L44 30 L60 54 L66 20" stroke="#5cc07f" stroke-width="2" opacity="0.55"/>
+      <path d="M22 100 L28 66 L44 90 L60 66 L66 100" stroke="#0c5a24" stroke-width="11"/>
+      <path d="M22 100 L28 66 L44 90 L60 66 L66 100" stroke="#20a24b" stroke-width="6.5"/>
+      <path d="M22 100 L28 66 L44 90 L60 66 L66 100" stroke="#5cc07f" stroke-width="2" opacity="0.55"/>
+    </g>
+  </g>
+</svg>

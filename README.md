@@ -17,18 +17,24 @@
 ```text
 mahjong-analyzer/
 ├── index.html          # 单页应用入口
+├── manifest.webmanifest# PWA 清单
+├── sw.js               # Service Worker（缓存 app shell 与 ONNX Runtime）
+├── _headers            # Cloudflare Pages 响应头
 ├── css/
 │   └── style.css       # 翡翠牌桌视觉样式与微动效
 ├── js/
 │   ├── app.js          # 主控制器（串联各模块与渲染）
 │   ├── camera.js       # 摄像头调用与图片加载
 │   ├── recognition.js  # ONNX YOLO 本地图像识别管线
+│   ├── model-store.js  # 模型持久化存储（Cache Storage，避免重复下载）
 │   ├── tile-selector.js# 手动选牌与手牌排序渲染
+│   ├── tile-art.js     # 条子/筒子/白板的 SVG 牌面
 │   ├── mahjong-engine.js# 核心算法引擎（胡牌/听牌/红中百搭）
 │   ├── analyzer.js     # 舍牌优化决策分析器
 │   └── test-engine.js  # 自动化测试用例
 ├── assets/
-│   └── model/          # 存放 YOLO ONNX 模型文件
+│   ├── model/          # 存放 YOLO ONNX 模型文件
+│   └── icons/          # PWA 图标（icon.svg 为源文件）
 └── package.json        # 项目依赖与开发脚本
 ```
 
@@ -78,6 +84,27 @@ node js/test-engine.js
 - 拿这一步验证 UI/分析引擎；确认无误后再回到方式 A/B 接入真实模型。
 
 拍照/上传后会显示带检测框的原图 + 可点击删除的识别结果列表，你可以在应用到手牌之前修正误检。
+
+## 📲 安装到主屏幕（强烈建议）
+
+识别模型约 12MB，**首次打开需要下载一次**。之后模型会被存进浏览器的 Cache Storage 长期保留，正常情况下不会再下载。
+
+不过 iOS Safari 会在大约 7 天无访问后清理普通网页的存储 —— 这正是「过几天打开又要重新下载」的原因。**把本站添加到主屏幕**可以豁免该策略，让模型真正留在本地：
+
+- **iPhone / iPad**：Safari 打开 → 点击底部「分享」→ 选择「添加到主屏幕」
+- **Android / Chrome**：菜单 → 「安装应用」或「添加到主屏幕」
+
+安装后从主屏图标启动，模型只在第一次下载，后续打开是秒开且零流量。状态条会显示「已从本地存储载入，未消耗流量」。
+
+> 想确认模型是否已存到本地：打开开发者工具 → Application → Cache Storage，应能看到 `mahjong-model-v3` 桶。
+
+### 本地验证 PWA
+
+`npm run dev`（Vite）下 Service Worker **不会注册**，因为 Vite 的 HMR 会与 SW 缓存互相干扰。要验证 PWA、离线能力或 `_headers`，请用与线上一致的静态服务：
+
+```bash
+npm run preview:pages   # wrangler pages dev → http://localhost:8788/
+```
 
 ## ⚖️ 许可
 

@@ -459,11 +459,57 @@ function updateModelStatus(kind, text) {
   modelStatusText.textContent = text;
 }
 
+/** 上次渲染的下载百分比，避免每个数据块都写一次 DOM */
+let lastShownPct = -1;
+
+/**
+ * 模型加载进度 → 状态条文案
+ * @param {{phase: string, received?: number, total?: number}} p
+ */
+function handleModelProgress(p) {
+  switch (p.phase) {
+    case 'stored':
+      updateModelStatus('loading', '正在从本地存储载入识别模型…');
+      break;
+
+    case 'downloading': {
+      const { received = 0, total = 0 } = p;
+      if (total > 0) {
+        const pct = Math.floor((received / total) * 100);
+        if (pct === lastShownPct) return;   // 节流：百分比没变就不动 DOM
+        lastShownPct = pct;
+        const mb = (total / 1048576).toFixed(1);
+        updateModelStatus(
+          'loading',
+          `首次使用，正在下载识别模型 ${pct}% (${mb}MB，仅需下载这一次)`
+        );
+      } else if (received > 0) {
+        updateModelStatus(
+          'loading',
+          `首次使用，正在下载识别模型 ${(received / 1048576).toFixed(1)}MB…`
+        );
+      } else {
+        updateModelStatus('loading', '首次使用，正在下载识别模型（约 12MB，仅此一次）…');
+      }
+      break;
+    }
+
+    case 'compiling':
+      updateModelStatus('loading', '正在初始化识别引擎…');
+      break;
+  }
+}
+
 // 尝试加载模型（后台，不阻塞）
 updateModelStatus('loading', '正在检测识别模型...');
-recognizer.loadModel().then((loaded) => {
+recognizer.loadModel(handleModelProgress).then((loaded) => {
   if (loaded) {
-    updateModelStatus('ok', '识别模型就绪。可以拍照识别。');
+    updateModelStatus(
+      'ok',
+      recognizer.loadedFromCache
+        ? '识别模型就绪（已从本地存储载入，未消耗流量）。'
+        : '识别模型就绪，已存到本地，下次打开无需重新下载。'
+    );
   } else if (recognizer.status === ModelStatus.MISSING) {
     updateModelStatus('warn', '未找到模型文件（assets/model/mahjong_yolov8n.onnx）。可用【演示识别】走通流程。');
   } else if (recognizer.status === ModelStatus.ORT_MISSING) {

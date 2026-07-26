@@ -7,11 +7,28 @@
   Permissions-Policy: camera=(self)
 
 # ONNX 模型文件：允许长时间缓存
+# 注意这只是「允许」浏览器缓存，浏览器仍可随时驱逐这 12MB。
+# 真正保证不重复下载的是 js/model-store.js 的 Cache Storage + persist()。
 /assets/model/*.onnx
   Cache-Control: public, max-age=31536000, immutable
   Content-Type: application/octet-stream
 
+# Service Worker：必须每次回源校验。
+# 若被长缓存，改了 sw.js 也推不到已安装的用户手里。
+/sw.js
+  Cache-Control: no-cache
+
+# PWA manifest 与图标
+/manifest.webmanifest
+  Cache-Control: public, max-age=3600
+  Content-Type: application/manifest+json
+/assets/icons/*
+  Cache-Control: public, max-age=604800
+
 # JS/CSS：短缓存，方便迭代
+# 实测自定义域下会被 Cloudflare zone 的 Browser Cache TTL(默认 4h) 覆盖成
+# max-age=14400。要让这里的 300 生效，需在 CF 控制台把 Browser Cache TTL
+# 设为 "Respect Existing Headers"。
 /js/*
   Cache-Control: public, max-age=300
 /css/*

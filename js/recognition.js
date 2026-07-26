@@ -2,9 +2,18 @@
  * recognition.js - ONNX Runtime Web 推理管线
  *
  * YOLOv8 麻将牌检测模型的预处理、推理、后处理管线。
- * 模型从默认路径 /assets/model/mahjong_yolov8n.onnx 自动加载；
+ * 模型经 model-store.js 从持久化存储加载(未命中才下载), 见该文件顶部注释。
  * 无模型时前端可走 buildDemoDetections 演示流程。
  */
+
+import { fetchModelBytes } from './model-store.js';
+
+/**
+ * 模型版本号。**替换 .onnx 文件时必须递增**:
+ *   1. 绕过 _headers 给模型设的一年 immutable HTTP 缓存
+ *   2. 切换 Cache Storage 的存储桶(旧版本会被自动清理)
+ */
+export const MODEL_VERSION = 3;
 
 /**
  * 模型状态枚举
@@ -26,11 +35,10 @@ export class TileRecognizer {
     this.status = ModelStatus.UNLOADED;
     /** @type {string} 最近一次错误信息 */
     this.lastError = '';
-    /** @type {string} 默认模型文件路径（相对于站点根）
-     *  ?v= 版本号用于绕过浏览器 immutable 缓存。
-     *  每次替换模型文件时递增该值，让用户拉取最新模型。
-     */
-    this.modelPath = '/assets/model/mahjong_yolov8n.onnx?v=3';
+    /** @type {boolean} 本次会话的模型是否来自持久化存储(未走网络) */
+    this.loadedFromCache = false;
+    /** @type {string} 默认模型文件路径（相对于站点根）。版本号见 MODEL_VERSION。 */
+    this.modelPath = `/assets/model/mahjong_yolov8n.onnx?v=${MODEL_VERSION}`;
 
     /** 检测置信度阈值 */
     this.confThreshold = 0.5;
@@ -112,10 +120,16 @@ export class TileRecognizer {
   }
 
   /**
-   * 加载 ONNX 模型（默认从 modelPath 拉取）
+   * 加载 ONNX 模型。
+   *
+   * 模型二进制优先来自 Cache Storage(见 model-store.js), 只有首次或缓存被清掉
+   * 时才走网络。拿到 bytes 后从内存创建会话, 不再让 ORT 自己去 fetch URL ——
+   * 这样下载和编译两个阶段可以分别反馈进度。
+   *
+   * @param {(p: {phase: string, received?: number, total?: number}) => void} [onProgress]
    * @returns {Promise<boolean>} 是否成功
    */
-  async loadModel() {
+  async loadModel(onProgress) {
     if (typeof ort === 'undefined') {
       this.status = ModelStatus.ORT_MISSING;
       this.lastError = 'ONNX Runtime Web 未加载（检查网络/CDN 或本地部署）';
@@ -125,33 +139,43 @@ export class TileRecognizer {
 
     this.status = ModelStatus.LOADING;
     try {
-      // 先探测文件是否存在，便于给出更明确的报错
-      const resp = await fetch(this.modelPath, { method: 'HEAD' });
-      if (!resp.ok) {
-        this.status = ModelStatus.MISSING;
-        this.lastError = `未找到模型文件：${this.modelPath}（请训练后放入该路径）`;
-        console.info(this.lastError);
-        return false;
-      }
+      const { bytes, fromCache } = await fetchModelBytes(
+        this.modelPath,
+        MODEL_VERSION,
+        onProgress
+      );
+      this.loadedFromCache = fromCache;
+      console.log(
+        `[recognizer] 模型就绪 (${(bytes.length / 1048576).toFixed(1)}MB, ` +
+        `${fromCache ? '本地存储命中' : '网络下载'}), 开始编译会话...`
+      );
 
-      console.log('[recognizer] 开始下载并初始化 ONNX 会话...');
+      onProgress?.({ phase: 'compiling' });
       // 只用 WASM: WebGPU 在部分浏览器/环境下会静默挂起，兼容性优先
-      const sessionPromise = ort.InferenceSession.create(this.modelPath, {
+      const sessionPromise = ort.InferenceSession.create(bytes, {
         executionProviders: ['wasm'],
         graphOptimizationLevel: 'all',
       });
-      // 60 秒超时保护，防止无限挂起
+      // 60 秒超时保护，防止无限挂起(此处只覆盖编译，下载有独立进度反馈)
       const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('模型初始化超时 (>60s)')), 60000)
+        setTimeout(() => reject(new Error('模型编译超时 (>60s)')), 60000)
       );
       this.session = await Promise.race([sessionPromise, timeoutPromise]);
       this.status = ModelStatus.READY;
+      onProgress?.({ phase: 'ready' });
       console.log('✅ 模型加载成功');
       return true;
     } catch (err) {
-      this.status = ModelStatus.ERROR;
-      this.lastError = err.message || String(err);
-      console.warn('模型加载失败:', err);
+      // 404 → 模型文件确实没部署，给出可操作的提示；其余归为加载错误
+      if (err.status === 404) {
+        this.status = ModelStatus.MISSING;
+        this.lastError = `未找到模型文件：${this.modelPath}（请训练后放入该路径）`;
+        console.info(this.lastError);
+      } else {
+        this.status = ModelStatus.ERROR;
+        this.lastError = err.message || String(err);
+        console.warn('模型加载失败:', err);
+      }
       return false;
     }
   }

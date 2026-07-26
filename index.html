@@ -5,13 +5,27 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>麻将听牌分析器 - 推倒胡 / 红中百搭</title>
   <meta name="description" content="拍照或手动输入麻将牌，智能分析听牌和最优出牌">
+
+  <!-- PWA：装到主屏后 iOS 才会豁免约 7 天的存储清理策略，
+       12MB 模型才能真正长期留在本地(详见 js/model-store.js) -->
+  <link rel="manifest" href="/manifest.webmanifest">
+  <meta name="theme-color" content="#0a1a10">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="麻将分析">
+  <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
+  <link rel="icon" href="/assets/icons/icon-192.png" type="image/png">
+
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/style.css">
 
-  <!-- ONNX Runtime Web (CDN)：为 recognition.js 提供全局 ort 对象 -->
-  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.19.2/dist/ort.min.js"></script>
+  <!-- ONNX Runtime Web (CDN)：为 recognition.js 提供全局 ort 对象。
+       crossorigin 让它以 CORS 模式请求，Service Worker 才能拿到真实
+       状态码并安全缓存(否则是 opaque 响应，见 sw.js 的 cacheFirst) -->
+  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.19.2/dist/ort.min.js" crossorigin="anonymous"></script>
   <script>
     // 将 wasm 二进制文件也指到同一 CDN，避免相对路径 404
     if (window.ort && ort.env && ort.env.wasm) {
@@ -19,6 +33,22 @@
       // 单线程 WASM: 不需要 SharedArrayBuffer / COOP/COEP，兼容性最好
       ort.env.wasm.numThreads = 1;
     }
+
+    // 注册 Service Worker（放在这里而非 app.js，确保独立于应用逻辑尽早执行）
+    //
+    // 开发服务器(Vite)下跳过：Vite 会把 CSS/JS 转成带 HMR 的模块，被 SW 缓存后
+    // 会和热更新互相干扰。要在本地验证 PWA/离线能力，用 `npm run preview:pages`
+    // (wrangler pages dev，真实静态服务，行为与线上一致)。
+    (function () {
+      var isDevServer = !!document.querySelector('script[src="/@vite/client"]');
+      if ('serviceWorker' in navigator && !isDevServer) {
+        window.addEventListener('load', function () {
+          navigator.serviceWorker.register('/sw.js').catch(function (err) {
+            console.warn('Service Worker 注册失败:', err);
+          });
+        });
+      }
+    })();
   </script>
 </head>
 <body>

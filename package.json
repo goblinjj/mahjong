@@ -7,7 +7,10 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "preview:pages": "wrangler pages dev . --port 8788",
+    "test": "node js/test-engine.js",
+    "icons": "rsvg-convert -w 192 -h 192 assets/icons/icon.svg -o assets/icons/icon-192.png && rsvg-convert -w 512 -h 512 assets/icons/icon.svg -o assets/icons/icon-512.png && rsvg-convert -w 180 -h 180 assets/icons/icon.svg -o assets/icons/apple-touch-icon.png"
   },
   "devDependencies": {
     "vite": "^6.0.0",
