@@ -21,6 +21,11 @@
 
 # Service Worker：必须每次回源校验。
 # 若被长缓存，改了 sw.js 也推不到已安装的用户手里。
+#
+# ⚠️ 线上实测这条**没有生效**：自定义域走 Cloudflare zone，其 Browser Cache TTL
+# (默认 4 小时) 会覆盖 _headers，sw.js 实际返回 max-age=14400。
+# 修复：CF 控制台 → 该域名 → Caching → Browser Cache TTL → "Respect Existing Headers"。
+# 影响有限(浏览器对 SW 脚本的更新检查本就绕过 HTTP 缓存)，但改掉更稳妥。
 /sw.js
   Cache-Control: no-cache
 
