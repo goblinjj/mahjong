@@ -258,11 +258,14 @@ export class DetectionFuser {
   /** 只读当前融合结果,不推进状态 */
   snapshot() {
     const tiles = this.tracks
-      .map((t) => ({
-        tileIndex: this._bestVote(t).tileIndex,
-        confidence: this._bestVote(t).confidence,
-        bbox: { x: t.cx - t.w / 2, y: t.cy - t.h / 2, w: t.w, h: t.h },
-      }))
+      .map((t) => {
+        const vote = this._bestVote(t);
+        return {
+          tileIndex: vote.tileIndex,
+          confidence: vote.confidence,
+          bbox: { x: t.cx - t.w / 2, y: t.cy - t.h / 2, w: t.w, h: t.h },
+        };
+      })
       .sort((a, b) => a.bbox.x - b.bbox.x);
     return { state: FuserState.COLLECTING, tiles, pending: 0, frames: this.frameSeq, progress: 0 };
   }
