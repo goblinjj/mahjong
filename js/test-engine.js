@@ -289,6 +289,68 @@ const HAND13 = [0, 1, 2, 9, 10, 11, 18, 19, 20, 27, 27, 32, 33];
 }
 
 // ============================================================
+console.log('\n=== 测试8: 检测融合 - 出现率分档与类别投票 ===');
+// ============================================================
+
+// 假阳:一个只在第 1 帧出现的框。出现率随窗口滑动衰减到 0.2 后被老化删除。
+// 中间几帧它会处于「待定」区间并计入 pending —— 这是设计使然,不是 bug。
+{
+  const fuser = new DetectionFuser();
+  let snap;
+  for (let f = 0; f < 6; f++) {
+    const frame = makeFrame(HAND13);
+    // 假阳与真牌同高、同基线,确保它能通过离群剔除,真正考验出现率逻辑
+    if (f === 0) frame.push({ tileIndex: 5, confidence: 0.9, bbox: { x: 900, y: 200, w: 40, h: 56 } });
+    snap = fuser.push(frame, f * 400);
+  }
+  assert(snap.tiles.length === 13, `单帧假阳不进入输出, 实际=${snap.tiles.length}`);
+  assert(snap.pending === 0, `假阳老化后 pending 归零, 实际=${snap.pending}`);
+}
+
+// 待定:某轨迹在 5 帧中只出现 2 帧(出现率 0.4),应计入 pending 且不进输出
+{
+  const fuser = new DetectionFuser();
+  let snap;
+  for (let f = 0; f < 5; f++) {
+    const frame = makeFrame(HAND13);
+    if (f === 0 || f === 2) {
+      frame.push({ tileIndex: 5, confidence: 0.9, bbox: { x: 900, y: 200, w: 40, h: 56 } });
+    }
+    snap = fuser.push(frame, f * 400);
+  }
+  assert(snap.tiles.length === 13, `待定轨迹不进入输出, 实际=${snap.tiles.length}`);
+  assert(snap.pending === 1, `待定轨迹计入 pending, 实际=${snap.pending}`);
+}
+
+// 类别投票:第 7 张前 4 帧判 5万(idx 4)、末帧判 6万(idx 5) → 应收敛到 5万。
+// 占比 0.8,与阈值 0.6 拉开距离,避免断言卡在浮点边界上。
+{
+  const fuser = new DetectionFuser();
+  let snap;
+  for (let f = 0; f < 5; f++) {
+    const hand = [...HAND13];
+    hand[6] = f < 4 ? 4 : 5;
+    snap = fuser.push(makeFrame(hand), f * 400);
+  }
+  assert(snap.tiles.length === 13, `类别跳变不影响张数, 实际=${snap.tiles.length}`);
+  assert(snap.tiles[6].tileIndex === 4, `类别投票收敛到多数类 5万, 实际=${snap.tiles[6].tileIndex}`);
+}
+
+// 类别僵持:某轨迹两类各占一半(占比 0.5 < voteRatio 0.6) → 未收敛,计入 pending。
+// 这正是用户报告的失败模式:5万/6万 反复跳,不该静默选一个。
+{
+  const fuser = new DetectionFuser();
+  let snap;
+  for (let f = 0; f < 6; f++) {
+    const hand = [...HAND13];
+    hand[6] = f % 2 === 0 ? 4 : 5;   // 交替,票重接近 1:1
+    snap = fuser.push(makeFrame(hand), f * 400);
+  }
+  assert(snap.pending === 1, `类别未收敛的轨迹计入 pending, 实际=${snap.pending}`);
+  assert(snap.tiles.length === 12, `类别未收敛的轨迹不进输出, 实际=${snap.tiles.length}`);
+}
+
+// ============================================================
 console.log('\n=== 测试结果 ===');
 console.log(`通过: ${passed}, 失败: ${failed}`);
 if (failed > 0) {

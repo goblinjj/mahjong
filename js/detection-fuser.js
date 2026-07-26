@@ -117,19 +117,42 @@ export class DetectionFuser {
     return this.snapshot();
   }
 
-  /** 只读当前融合结果,不推进状态 */
+  /**
+   * 只读当前融合结果,不推进状态。
+   *
+   * 轨迹按出现率与类别收敛度分三档:
+   *   确认存在(出现率 ≥ presentRate 且投票占比 ≥ voteRatio) → 计入 tiles
+   *   待定(出现率在 [pendingRate, presentRate),或投票未收敛)  → 计入 pending
+   *   噪声(出现率 < pendingRate) → 已在 _ageOut 中删除
+   *
+   * 「待定」这一档是有意的:降低置信度阈值后必然出现若隐若现的框,若只做
+   * 二分,它们要么污染结果、要么被静默丢弃 —— 静默丢弃正是「一会儿 12 张」
+   * 的问题,只是变成稳定地给出 12 张,更糟。让它阻止稳定并提示用户,用户才
+   * 知道该调整角度或光线。
+   */
   snapshot() {
-    const tiles = this.tracks
-      .map((t) => {
-        const vote = this._bestVote(t);
-        return {
-          tileIndex: vote.tileIndex,
-          confidence: vote.confidence,
-          bbox: { x: t.cx - t.w / 2, y: t.cy - t.h / 2, w: t.w, h: t.h },
-        };
-      })
+    const { presentRate, voteRatio } = this.config;
+    const present = [];
+    let pending = 0;
+
+    for (const t of this.tracks) {
+      const vote = this._bestVote(t);
+      if (this._rate(t) >= presentRate && vote.ratio >= voteRatio) {
+        present.push({ track: t, vote });
+      } else {
+        pending++;
+      }
+    }
+
+    const tiles = present
+      .map(({ track, vote }) => ({
+        tileIndex: vote.tileIndex,
+        confidence: vote.confidence,
+        bbox: { x: track.cx - track.w / 2, y: track.cy - track.h / 2, w: track.w, h: track.h },
+      }))
       .sort((a, b) => a.bbox.x - b.bbox.x);
-    return { state: FuserState.COLLECTING, tiles, pending: 0, frames: this.frameSeq, progress: 0 };
+
+    return { state: FuserState.COLLECTING, tiles, pending, frames: this.frameSeq, progress: 0 };
   }
 
   /** 本帧牌宽的中位数;本帧为空则退回轨迹宽度 */
