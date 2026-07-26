@@ -40,8 +40,12 @@ export class TileRecognizer {
     /** @type {string} 默认模型文件路径（相对于站点根）。版本号见 MODEL_VERSION。 */
     this.modelPath = `/assets/model/mahjong_yolov8n.onnx?v=${MODEL_VERSION}`;
 
-    /** 检测置信度阈值 */
-    this.confThreshold = 0.5;
+    /**
+     * 检测置信度阈值。
+     * 刻意设得比常规低:先把弱证据放进来,再由 detection-fuser.js 用多帧
+     * 出现率把噪声滤出去。单帧看会有假阳,融合后反而更稳。
+     */
+    this.confThreshold = 0.3;
     /** NMS IoU 阈值 (麻将牌通常紧贴不重叠，用较低阈值抑制重复框) */
     this.iouThreshold = 0.35;
     /** 模型输入尺寸 */

@@ -14,6 +14,7 @@ import { Camera } from './camera.js';
 import { TileRecognizer, ModelStatus } from './recognition.js';
 import { analyzeHand } from './analyzer.js';
 import { TILE_NAMES, WILD_TILE } from './mahjong-engine.js';
+import { DetectionFuser, FuserState } from './detection-fuser.js';
 
 // ============================================================
 // DOM 引用
@@ -124,6 +125,8 @@ let liveDetections = [];
 let liveImageData = null;
 /** 检测循环运行标志 */
 let detectionLoopActive = false;
+/** 多帧检测融合器:消除单帧识别的张数与类别抖动 */
+const fuser = new DetectionFuser();
 
 async function startCamera() {
   if (!navigator.mediaDevices?.getUserMedia) {
@@ -149,6 +152,7 @@ function startDetectionLoop() {
 
 function stopDetectionLoop() {
   detectionLoopActive = false;
+  fuser.reset();
   liveDetections = [];
   liveImageData = null;
   const ctx = cameraOverlay.getContext('2d');
@@ -203,9 +207,11 @@ async function detectionTick() {
     if (result.success) {
       // 把条带内的 bbox 平移回全帧坐标系,叠加层和冻结预览才能对齐
       result.tiles.forEach((d) => { d.bbox.y += yOffset; });
-      liveDetections = result.tiles;
+      // 喂给融合器:叠加层画的是多帧融合结果而非最后一帧,框本身也不再抖
+      const snap = fuser.push(result.tiles, performance.now());
+      liveDetections = snap.tiles;
       liveImageData = imageData;
-      updateLiveBadge();
+      updateLiveBadge(snap);
       drawOverlay();
     }
   } catch (err) {
@@ -247,7 +253,7 @@ window.addEventListener('orientationchange', () => {
   }, 200);
 });
 
-function updateLiveBadge() {
+function updateLiveBadge(snap) {
   const n = liveDetections.length;
   if (n === 0) {
     liveCountBadge.textContent = '未检测到牌';
