@@ -127,9 +127,14 @@ let liveImageData = null;
 let detectionLoopActive = false;
 /**
  * 检测会话代数。每次 stopDetectionLoop 递增。
- * 用于甄别"停止前发起、停止后才 resolve"的过期 in-flight 请求——
- * 仅靠 detectionLoopActive 不够,因为停止后若立刻重启,该标志会重新变 true,
- * 过期请求会被误认为属于新会话,把 reset 前的旧证据喂给刚清空的融合器。
+ * 用于甄别两类"属于旧会话"的过期调用——仅靠 detectionLoopActive 不够,
+ * 因为停止后若立刻重启,该标志会重新变 true,旧调用会被误认为属于新会话:
+ * 1. 停止前发起、停止后才 resolve 的 in-flight 请求(await recognizer.detect 期间);
+ * 2. 停止前排下、未及取消的 setTimeout 重新调度(轮询/稳态节奏都会重新调度),
+ *    它在会话重启后触发时会长成第二条并行的检测循环,和新链同时往同一个
+ *    融合器 push,破坏融合器对帧间隔的假设(详见 detectionTick 的参数注释)。
+ * detectionTick 把它作为参数逐级传递,而不是每次现读全局值,才能让旧链
+ * 在自己发起时就"冻结"所属代数,不会被会话重启偷换身份。
  */
 let detectionSessionId = 0;
 /** 多帧检测融合器:消除单帧识别的张数与类别抖动 */
@@ -189,15 +194,23 @@ function cropToGuideBand(imageData) {
   return { cropped, yOffset: yStart };
 }
 
-async function detectionTick() {
-  if (!detectionLoopActive) return;
-  // 在任何 await 之前锁定本次调用所属的会话代数,稍后用它判断
-  // "等待 recognizer.detect() 期间会话是否已被 stopDetectionLoop 终止并重启"
-  const sessionId = detectionSessionId;
+/**
+ * 检测循环的单次 tick。会通过 setTimeout 递归重新调度自己,形成一条链。
+ * @param {number} [sessionId] 本条调用链所属的会话代数。省略时取当前
+ *   detectionSessionId(仅 startDetectionLoop 发起新链时这样用)。此后每次
+ *   setTimeout 重新调度都必须显式把它带下去,而不是重新读取全局值——
+ *   否则一条在会话终止后才触发的孤儿定时器,会在会话重启后把自己误认成
+ *   属于新链,和新链一起并行向同一个融合器 push,使 push 频率翻倍,
+ *   融合器"约 5 帧 ≈ 2 秒"的节奏假设失效。
+ */
+async function detectionTick(sessionId = detectionSessionId) {
+  // 会话已终止,或本条链所属的代数已不是当前代数(包含孤儿定时器的情形):
+  // 两者都意味着这次调用不该再继续。
+  if (!detectionLoopActive || sessionId !== detectionSessionId) return;
 
   // 未就绪时轻量轮询
   if (!recognizer.isLoaded || !camera.isActive || cameraVideo.videoWidth === 0) {
-    setTimeout(detectionTick, 300);
+    setTimeout(detectionTick, 300, sessionId);
     return;
   }
 
@@ -205,7 +218,7 @@ async function detectionTick() {
 
   const imageData = camera.capture();
   if (!imageData) {
-    setTimeout(detectionTick, 200);
+    setTimeout(detectionTick, 200, sessionId);
     return;
   }
 
@@ -232,7 +245,7 @@ async function detectionTick() {
   }
 
   // 让出主线程,避免掉帧和过热
-  setTimeout(detectionTick, 80);
+  setTimeout(detectionTick, 80, sessionId);
 }
 
 /** 取相框视口显示的条带占全帧高度的比例(与 BAND_TOP/BOTTOM_FRAC 一致) */
