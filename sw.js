@@ -50,12 +50,12 @@ const SHELL_ASSETS = [
   '/assets/icons/apple-touch-icon.png',
 ];
 
-/** 走 cache-first 的第三方源(URL 都带版本号或内容哈希，可安全长期缓存) */
-const VENDOR_HOSTS = [
-  'cdn.jsdelivr.net',    // onnxruntime-web 的 ort.min.js + wasm
-  'fonts.googleapis.com',
-  'fonts.gstatic.com',
-];
+/**
+ * 自托管的第三方运行时前缀（ONNX Runtime 的 js + wasm，约 11MB）。
+ * 目录名带版本号 → 内容不可变 → 必须 cache-first：
+ * 若走 stale-while-revalidate，每次打开都会在后台重新下载 11MB。
+ */
+const VENDOR_PATH_PREFIX = '/assets/vendor/';
 
 // ============================================================
 // 生命周期
@@ -115,16 +115,16 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // 第三方运行时：cache-first（URL 已版本化，内容不会变）
-  if (VENDOR_HOSTS.includes(url.hostname)) {
+  if (url.origin !== self.location.origin) return;
+
+  // 自托管运行时：cache-first（路径已版本化，内容不会变）
+  if (url.pathname.startsWith(VENDOR_PATH_PREFIX)) {
     event.respondWith(cacheFirst(request, VENDOR_CACHE));
     return;
   }
 
-  // 同源静态资源：stale-while-revalidate，秒开且后台更新
-  if (url.origin === self.location.origin) {
-    event.respondWith(staleWhileRevalidate(request, SHELL_CACHE));
-  }
+  // 其余同源静态资源：stale-while-revalidate，秒开且后台更新
+  event.respondWith(staleWhileRevalidate(request, SHELL_CACHE));
 });
 
 // ============================================================

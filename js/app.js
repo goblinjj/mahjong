@@ -513,7 +513,7 @@ recognizer.loadModel(handleModelProgress).then((loaded) => {
   } else if (recognizer.status === ModelStatus.MISSING) {
     updateModelStatus('warn', '未找到模型文件（assets/model/mahjong_yolov8n.onnx）。可用【演示识别】走通流程。');
   } else if (recognizer.status === ModelStatus.ORT_MISSING) {
-    updateModelStatus('error', 'ONNX Runtime 未加载。请检查网络或改用离线部署。');
+    updateModelStatus('error', 'ONNX Runtime 未加载。请刷新页面重试。');
   } else {
     updateModelStatus('error', recognizer.humanReadableStatus());
   }

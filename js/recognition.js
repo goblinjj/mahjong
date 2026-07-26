@@ -132,7 +132,7 @@ export class TileRecognizer {
   async loadModel(onProgress) {
     if (typeof ort === 'undefined') {
       this.status = ModelStatus.ORT_MISSING;
-      this.lastError = 'ONNX Runtime Web 未加载（检查网络/CDN 或本地部署）';
+      this.lastError = 'ONNX Runtime Web 未加载（assets/vendor/ 下的 ort.min.js 未能执行）';
       console.warn(this.lastError);
       return false;
     }
@@ -214,7 +214,7 @@ export class TileRecognizer {
   humanReadableStatus() {
     switch (this.status) {
       case ModelStatus.ORT_MISSING:
-        return 'ONNX Runtime Web 未能加载：请检查网络（脚本从 jsdelivr CDN 引入），或改用离线部署。';
+        return 'ONNX Runtime Web 未能加载：请刷新页面重试（运行时随站点一起分发，位于 assets/vendor/）。';
       case ModelStatus.MISSING:
         return '尚未提供模型文件。请将训练好的 .onnx 文件放入 assets/model/mahjong_yolov8n.onnx。';
       case ModelStatus.ERROR:

@@ -41,7 +41,12 @@
   --radius-lg: 16px;
   --radius-xl: 20px;
 
-  --font-family: 'Noto Sans SC', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  /* 纯系统字体栈，不依赖任何外部字体服务(大陆访问不到 Google Fonts)。
+     iOS/macOS → 苹方, HarmonyOS → 鸿蒙黑体, Android → 思源黑体, Windows → 微软雅黑。
+     'Noto Sans SC' 保留在靠后位置：本机装了就用，没装也不会发起网络请求。 */
+  --font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'HarmonyOS Sans SC',
+    'Source Han Sans SC', 'Noto Sans SC', 'Hiragino Sans GB', 'Microsoft YaHei',
+    'WenQuanYi Micro Hei', sans-serif;
 
   --max-width: 480px;
   --transition-fast: 0.15s ease;

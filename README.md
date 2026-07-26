@@ -34,9 +34,13 @@ mahjong-analyzer/
 │   └── test-engine.js  # 自动化测试用例
 ├── assets/
 │   ├── model/          # 存放 YOLO ONNX 模型文件
+│   ├── vendor/         # 自托管的 ONNX Runtime（不依赖境外 CDN）
 │   └── icons/          # PWA 图标（icon.svg 为源文件）
 └── package.json        # 项目依赖与开发脚本
 ```
+
+> 🇨🇳 **零境外依赖**：页面不请求任何境外资源。字体使用系统中文字体栈（不用 Google Fonts），
+> ONNX Runtime 自托管在 `assets/vendor/`（不用 jsdelivr），中国大陆可正常访问。
 
 ## 🚀 快速开始
 
@@ -67,7 +71,7 @@ node js/test-engine.js
 
 ### 3. 配置本地 AI 拍照识别
 
-拍照识别使用浏览器端的 **ONNX Runtime Web**（由 `index.html` 从 jsdelivr CDN 引入 `ort.min.js` 及配套 wasm）。识别模型接入有三种方式：
+拍照识别使用浏览器端的 **ONNX Runtime Web**（自托管于 `assets/vendor/onnxruntime-web@1.19.2/`，不依赖境外 CDN）。识别模型接入有三种方式：
 
 **方式 A · 默认路径**
 1. 训练 YOLOv8 麻将牌检测模型（类别定义详见 [`assets/model/README.md`](./assets/model/README.md)）。

@@ -17,19 +17,20 @@
   <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
   <link rel="icon" href="/assets/icons/icon-192.png" type="image/png">
 
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;900&display=swap" rel="stylesheet">
+  <!-- 不引入 Google Fonts：大陆访问不到，而 <link rel=stylesheet> 是渲染阻塞的，
+       会让首屏白屏直到连接超时。改用系统中文字体栈(见 css 的 --font-family)，
+       iOS 的苹方 / Android 的思源黑体本身就是最佳选择，还省掉一次外部请求。 -->
   <link rel="stylesheet" href="/css/style.css">
 
-  <!-- ONNX Runtime Web (CDN)：为 recognition.js 提供全局 ort 对象。
-       crossorigin 让它以 CORS 模式请求，Service Worker 才能拿到真实
-       状态码并安全缓存(否则是 opaque 响应，见 sw.js 的 cacheFirst) -->
-  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.19.2/dist/ort.min.js" crossorigin="anonymous"></script>
+  <!-- ONNX Runtime Web：自托管，不走 cdn.jsdelivr.net。
+       jsdelivr 在中国大陆访问不稳定，一旦拉不到，拍照识别功能会完全不可用。
+       目录名带版本号，升级时改路径即可让缓存自然失效(见 _headers 的 immutable)。
+       升级 ORT 时需同步替换 assets/vendor/ 下的三个文件并更新这里的路径。 -->
+  <script src="/assets/vendor/onnxruntime-web@1.19.2/ort.min.js"></script>
   <script>
-    // 将 wasm 二进制文件也指到同一 CDN，避免相对路径 404
+    // wasm 二进制与 ort.min.js 放在同一目录
     if (window.ort && ort.env && ort.env.wasm) {
-      ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.19.2/dist/';
+      ort.env.wasm.wasmPaths = '/assets/vendor/onnxruntime-web@1.19.2/';
       // 单线程 WASM: 不需要 SharedArrayBuffer / COOP/COEP，兼容性最好
       ort.env.wasm.numThreads = 1;
     }

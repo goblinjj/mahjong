@@ -29,8 +29,28 @@ npx wrangler pages deploy .   # 部署到 Cloudflare Pages 项目 "majiang"
 `wrangler.toml` 里 `pages_build_output_dir = "."`——Cloudflare Pages 直接把仓库根目录当静态站点发布，**不跑 `npm run build`**。因此：
 
 - `index.html` / `js/*.js` 必须是浏览器可直接执行的原生 ES 模块，import 只能用相对路径（`./xxx.js`，带扩展名）。**不要引入需要打包的裸模块名（`import x from 'pkg'`）或 npm 依赖**，那样本地 vite 能跑但线上直接 404。
-- ONNX Runtime 通过 `index.html` 的 CDN `<script>` 引入，以全局 `ort` 使用（`recognition.js` 里没有 import）。
+- ONNX Runtime 通过 `index.html` 的 `<script>` 引入，以全局 `ort` 使用（`recognition.js` 里没有 import）。
 - `_headers` 配置 Cloudflare 响应头：`.onnx` 是 `immutable, max-age=1y`。
+
+### 面向中国大陆：零境外依赖是硬约束
+
+主要用户在中国大陆，因此**页面不允许请求任何境外资源**。已经踩过的两处：
+
+- **Google Fonts**：`fonts.googleapis.com` 在大陆被墙，而 `<link rel="stylesheet">` 是渲染阻塞的 —— 会白屏到连接超时。已移除，改用纯系统中文字体栈（见 `css/style.css` 的 `--font-family`）。iOS 苹方 / Android 思源黑体本身就是最佳选择，视觉无损失。
+- **cdn.jsdelivr.net**：ORT 运行时曾从这里加载，大陆访问不稳定，拉不到则识别功能完全不可用。已自托管到 `assets/vendor/onnxruntime-web@1.19.2/`（3 个文件，wasm 未压缩 11MB）。
+
+新增任何外部资源前先问：大陆能不能访问？验证方式是跑一遍页面并确认没有非同源请求。
+
+### 升级 ONNX Runtime 的完整步骤
+
+vendor 目录名带版本号，这是缓存失效机制，不是装饰。升级时四处都要改：
+
+1. 下载新版的 `ort.min.js`、`ort-wasm-simd-threaded.mjs`、`ort-wasm-simd-threaded.wasm` 到 `assets/vendor/onnxruntime-web@<新版本>/`
+2. `index.html`：`<script src>` 与 `ort.env.wasm.wasmPaths` 两处路径
+3. `sw.js`：递增 `VERSION`，让旧的 vendor 缓存桶被清理（否则用户会一直用旧的 11MB）
+4. 删掉旧版本目录
+
+具体需要哪几个文件由 ORT 的运行时决定（当前配置 `numThreads = 1`，走 SIMD 单线程分支）。改配置后应重新跑一遍页面，确认没有 404。
 
 ### 模型文件替换必须递增 MODEL_VERSION
 
@@ -49,6 +69,10 @@ npx wrangler pages deploy .   # 部署到 Cloudflare Pages 项目 "majiang"
 `sw.js` 的 `activate` 清理旧缓存时，只删 `OWNED_PREFIXES`（`mahjong-shell-` / `mahjong-vendor-`）里的桶。**`mahjong-model-` 前缀由 model-store.js 独占管理，SW 误删会直接导致用户重下 12MB** —— 正是本项目要根治的问题。`fetch` 事件里也对 `.onnx` 直接 return 放行。
 
 新增缓存桶时务必确认前缀不与模型桶冲突。
+
+### 大文件必须 cache-first，不能 stale-while-revalidate
+
+`/assets/vendor/*`（11MB 的 ORT wasm）在 `sw.js` 里走 `cacheFirst`。如果误用同源默认的 `staleWhileRevalidate`，**每次打开页面都会在后台重新下载 11MB** —— 用户看不到，但流量实实在在。判断标准是内容可变性：vendor 路径带版本号、内容不可变 → cache-first；HTML/CSS/JS 会改 → stale-while-revalidate。
 
 ### SW 预缓存要当心内容协商
 
