@@ -26,14 +26,14 @@ export const DEFAULT_CONFIG = {
   windowSize: 5,          // 滑动窗口帧数
   presentRate: 0.6,       // 出现率 ≥ 此值视为「确认存在」
   pendingRate: 0.3,       // 出现率 < 此值视为噪声,老化删除
-  // 类别投票胜出占比下限。**必须 > 0.5**:只有两个候选类别时,胜出方占比
-  // 恒 ≥ 0.5,阈值取 0.5 会让「5万/6万 各占一半」恰好通过收敛判定并静默
-  // 选一个 —— 那正是本次要消除的失败模式。
-  voteRatio: 0.6,
+  // 类别投票胜出占比下限。票随 windowSize=5 的滑动窗口,窗口内两个候选类别
+  // 只能分成 5:0/4:1/3:2,比例只能取 1.0/0.8/0.6 —— 0.6 是可达最小值,阈值
+  // 若取 0.6 则 ratio >= voteRatio 恒成立,闸门失效。取 0.7 意味着「5 帧里
+  // 至少 4 帧同类」,离 0.6/0.8 两侧都有余量,不卡在窗口能达到的边界值上。
+  voteRatio: 0.7,
   stableFrames: 3,        // 输出连续一致所需帧数
   matchRadiusCoarse: 1.0, // 粗匹配阈值(牌宽倍数),用于估计全局位移
   matchRadiusFine: 0.4,   // 补偿后精匹配阈值(牌宽倍数)
-  resetShiftRatio: 1.5,   // 触发 reset 的位移(牌宽倍数)
   degradeAfterMs: 8000,   // 持续不稳定多久后降级
   emaAlpha: 0.5,          // 轨迹位置/尺寸的 EMA 平滑系数
   minFramesForState: 3,   // 少于此帧数一律 COLLECTING
@@ -86,6 +86,16 @@ export class DetectionFuser {
     /** 已处理帧数,同时用作帧序号 */
     this.frameSeq = 0;
     this._nextId = 1;
+    /** 上一帧输出的牌多重集签名,用于判断输出是否连续一致 */
+    this._lastSig = null;
+    /** 输出连续一致的帧数 */
+    this._consistent = 0;
+    /** 进入 UNSTABLE 的时间戳(ms);0 表示当前不处于 UNSTABLE */
+    this._unstableSince = 0;
+    /** 最近一次 push 传入的时间戳 */
+    this._now = 0;
+    /** 本帧是否出现「检测类别与轨迹既有胜出类别不符」 */
+    this._conflict = false;
   }
 
   /**
@@ -98,19 +108,17 @@ export class DetectionFuser {
     const dets = rejectOutliers(detections || [], this.config);
     const tileW = this._tileWidth(dets);
 
-    // 位移估计要用上一帧的轨迹,必须在 reset 判定之前算
+    // 位移估计要用上一帧的轨迹
     const shift = this._estimateShift(dets, tileW);
-    if (shift && Math.hypot(shift.dx, shift.dy) > this.config.resetShiftRatio * tileW) {
-      // 手机被挪开或换了牌 —— 旧证据必须作废,否则新旧牌的投票会混在一起,
-      // 用户会拿到一副从未存在过的手牌
-      this.reset();
-    } else if (shift) {
+    if (shift) {
       for (const t of this.tracks) {
         t.cx += shift.dx;
         t.cy += shift.dy;
       }
     }
 
+    this._now = now;
+    this._conflict = false;
     this.frameSeq++;
     this._match(dets, tileW);
     this._ageOut();
@@ -152,7 +160,57 @@ export class DetectionFuser {
       }))
       .sort((a, b) => a.bbox.x - b.bbox.x);
 
-    return { state: FuserState.COLLECTING, tiles, pending, frames: this.frameSeq, progress: 0 };
+    return { tiles, pending, frames: this.frameSeq, ...this._judge(tiles, pending) };
+  }
+
+  /**
+   * 裁决状态与进度。每帧重新裁决,因此 DEGRADED 不是终态 ——
+   * 判据重新满足会直接升回 STABLE,降级只是解除「按钮永远不亮」的锁死。
+   *
+   * 注意:本方法有副作用(维护连续一致计数与降级计时),只应由 snapshot() 调用一次。
+   */
+  _judge(tiles, pending) {
+    const { minFramesForState, stableFrames, windowSize, degradeAfterMs } = this.config;
+
+    // 输出的牌多重集是否与上一帧一致
+    const sig = tiles.map((d) => d.tileIndex).sort((a, b) => a - b).join(',');
+    if (sig === this._lastSig) {
+      this._consistent++;
+    } else {
+      this._lastSig = sig;
+      this._consistent = 1;
+    }
+
+    let state;
+    if (this.frameSeq < minFramesForState) {
+      state = FuserState.COLLECTING;
+    } else if (!this._conflict && pending === 0 && tiles.length > 0 && this._consistent >= stableFrames) {
+      state = FuserState.STABLE;
+    } else {
+      state = FuserState.UNSTABLE;
+    }
+
+    // 持续不稳定太久则降级,否则光线差的场景下按钮永远不亮,功能直接不可用
+    if (state === FuserState.UNSTABLE) {
+      if (this._unstableSince === 0) {
+        this._unstableSince = this._now;
+      } else if (this._now - this._unstableSince >= degradeAfterMs) {
+        state = FuserState.DEGRADED;
+      }
+    } else {
+      this._unstableSince = 0;
+    }
+
+    // 进度取「帧数」与「连续一致帧数」两个分量的较小值。
+    // 有待定轨迹时封顶 0.99 —— 此时再攒多少帧也不会稳定,进度条不该显示满格。
+    let progress = Math.min(
+      this.frameSeq / windowSize,
+      this._consistent / stableFrames,
+      1
+    );
+    if (pending > 0) progress = Math.min(progress, 0.99);
+
+    return { state, progress };
   }
 
   /** 本帧牌宽的中位数;本帧为空则退回轨迹宽度 */
@@ -230,8 +288,7 @@ export class DetectionFuser {
       cy: c.y,
       w: det.bbox.w,
       h: det.bbox.h,
-      hits: [this.frameSeq],
-      votes: new Map([[det.tileIndex, det.confidence]]),
+      hits: [{ frame: this.frameSeq, tileIndex: det.tileIndex, conf: det.confidence }],
       bornFrame: this.frameSeq,
       lastFrame: this.frameSeq,
     };
@@ -244,9 +301,13 @@ export class DetectionFuser {
     track.cy += a * (c.y - track.cy);
     track.w += a * (det.bbox.w - track.w);
     track.h += a * (det.bbox.h - track.h);
-    track.hits.push(this.frameSeq);
     track.lastFrame = this.frameSeq;
-    track.votes.set(det.tileIndex, (track.votes.get(det.tileIndex) || 0) + det.confidence);
+    // 与既有胜出类别不符 → 记录冲突。仅在轨迹已有历史时判定,
+    // 新生轨迹只有一票,无所谓「既有胜出类别」。
+    if (track.hits.length > 1 && this._bestVote(track).tileIndex !== det.tileIndex) {
+      this._conflict = true;
+    }
+    track.hits.push({ frame: this.frameSeq, tileIndex: det.tileIndex, conf: det.confidence });
   }
 
   /** 裁剪窗口外的命中记录,并删除出现率跌破噪声线的轨迹 */
@@ -254,7 +315,7 @@ export class DetectionFuser {
     const { windowSize, pendingRate } = this.config;
     const kept = [];
     for (const t of this.tracks) {
-      t.hits = t.hits.filter((f) => f > this.frameSeq - windowSize);
+      t.hits = t.hits.filter((h) => h.frame > this.frameSeq - windowSize);
       if (this._rate(t) >= pendingRate) kept.push(t);
     }
     this.tracks = kept;
@@ -272,11 +333,15 @@ export class DetectionFuser {
    *   ratio 为胜出类别的票重占比;confidence 为该类别的平均置信度
    */
   _bestVote(track) {
+    const weights = new Map();
+    let total = 0;
+    for (const h of track.hits) {
+      weights.set(h.tileIndex, (weights.get(h.tileIndex) || 0) + h.conf);
+      total += h.conf;
+    }
     let bestIndex = -1;
     let bestWeight = 0;
-    let total = 0;
-    for (const [tileIndex, weight] of track.votes) {
-      total += weight;
+    for (const [tileIndex, weight] of weights) {
       if (weight > bestWeight) {
         bestWeight = weight;
         bestIndex = tileIndex;

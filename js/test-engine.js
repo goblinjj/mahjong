@@ -336,7 +336,7 @@ console.log('\n=== 测试8: 检测融合 - 出现率分档与类别投票 ===');
   assert(snap.tiles[6].tileIndex === 4, `类别投票收敛到多数类 5万, 实际=${snap.tiles[6].tileIndex}`);
 }
 
-// 类别僵持:某轨迹两类各占一半(占比 0.5 < voteRatio 0.6) → 未收敛,计入 pending。
+// 类别僵持:某轨迹两类各占一半(占比 0.6 < voteRatio 0.7) → 未收敛,计入 pending。
 // 这正是用户报告的失败模式:5万/6万 反复跳,不该静默选一个。
 {
   const fuser = new DetectionFuser();
@@ -348,6 +348,115 @@ console.log('\n=== 测试8: 检测融合 - 出现率分档与类别投票 ===');
   }
   assert(snap.pending === 1, `类别未收敛的轨迹计入 pending, 实际=${snap.pending}`);
   assert(snap.tiles.length === 12, `类别未收敛的轨迹不进输出, 实际=${snap.tiles.length}`);
+}
+
+// ============================================================
+console.log('\n=== 测试9: 检测融合 - 状态机 ===');
+// ============================================================
+
+// 帧数不足 → COLLECTING;攒够且判据满足 → STABLE
+{
+  const fuser = new DetectionFuser();
+  const first = fuser.push(makeFrame(HAND13), 0);
+  assert(first.state === 'collecting', `首帧为 collecting, 实际=${first.state}`);
+  let snap = first;
+  for (let f = 1; f < 6; f++) snap = fuser.push(makeFrame(HAND13), f * 400);
+  assert(snap.state === 'stable', `稳定输入 6 帧后进入 stable, 实际=${snap.state}`);
+  assert(snap.progress === 1, `stable 时 progress 为 1, 实际=${snap.progress}`);
+}
+
+// 存在待定轨迹 → 永远不进 stable,且 progress 封顶 0.99
+{
+  const fuser = new DetectionFuser();
+  let snap;
+  for (let f = 0; f < 6; f++) {
+    const frame = makeFrame(HAND13);
+    if (f % 2 === 0) {
+      frame.push({ tileIndex: 5, confidence: 0.9, bbox: { x: 900, y: 200, w: 40, h: 56 } });
+    }
+    snap = fuser.push(frame, f * 400);
+  }
+  assert(snap.pending === 1, `半数帧出现的框记为待定, 实际=${snap.pending}`);
+  assert(snap.state !== 'stable', `有待定时不得进入 stable, 实际=${snap.state}`);
+  assert(snap.progress <= 0.99, `有待定时 progress 封顶 0.99, 实际=${snap.progress}`);
+}
+
+// 张数持续变化 → 输出不连续一致,不得进入 stable
+{
+  const fuser = new DetectionFuser();
+  let snap;
+  for (let f = 0; f < 6; f++) {
+    // 每帧真的换一副牌(整体换类别),投票无法收敛
+    const hand = HAND13.map((t, i) => (i === 6 ? (f % 3) : t));
+    snap = fuser.push(makeFrame(hand), f * 400);
+  }
+  assert(snap.state !== 'stable', `类别持续跳变不得进入 stable, 实际=${snap.state}`);
+}
+
+// 场景切换:换一副牌(位置不变、类别全变)。旧票应随窗口自然过期,
+// 收敛到新牌;过渡期间不得报 stable(否则会绿灯给出旧手牌)。
+{
+  const OTHER13 = [4, 5, 6, 13, 14, 15, 22, 23, 24, 28, 28, 33, 32];
+  const fuser = new DetectionFuser();
+  for (let f = 0; f < 5; f++) fuser.push(makeFrame(HAND13), f * 400);
+
+  // 换牌后第 1 帧:旧票仍占多数,但本帧存在类别冲突 → 不得 stable
+  const mid = fuser.push(makeFrame(OTHER13), 2000);
+  assert(mid.state !== 'stable', `换牌过渡期不得报 stable, 实际=${mid.state}`);
+
+  // 过渡期旧新票各占一半时 ratio 达不到 0.7,轨迹全部落入 pending;
+  // 需喂到旧票完全出窗(第 11 帧)才会重新稳定
+  let snap = mid;
+  for (let f = 6; f < 11; f++) snap = fuser.push(makeFrame(OTHER13), f * 400);
+  const got = snap.tiles.map((t) => t.tileIndex).join(',');
+  assert(got === OTHER13.join(','), `旧票过期后收敛到新牌, 实际=${got}`);
+  assert(snap.state === 'stable', `收敛后回到 stable, 实际=${snap.state}`);
+}
+
+// 持续不稳定超过 8 秒 → 降级为 degraded,输出仍只含确认存在的轨迹
+{
+  const fuser = new DetectionFuser();
+  let snap;
+  for (let f = 0; f < 30; f++) {
+    const frame = makeFrame(HAND13);
+    if (f % 2 === 0) {
+      frame.push({ tileIndex: 5, confidence: 0.9, bbox: { x: 900, y: 200, w: 40, h: 56 } });
+    }
+    snap = fuser.push(frame, f * 400);   // 30 帧 × 400ms = 11.6s > 8s
+  }
+  assert(snap.state === 'degraded', `持续不稳定 8s 后降级, 实际=${snap.state}`);
+  assert(snap.tiles.length === 13, `降级时输出不含待定轨迹, 实际=${snap.tiles.length}`);
+}
+
+// degraded 不是终态:判据重新满足应升回 stable
+{
+  const fuser = new DetectionFuser();
+  let snap;
+  for (let f = 0; f < 30; f++) {
+    const frame = makeFrame(HAND13);
+    if (f % 2 === 0) {
+      frame.push({ tileIndex: 5, confidence: 0.9, bbox: { x: 900, y: 200, w: 40, h: 56 } });
+    }
+    snap = fuser.push(frame, f * 400);
+  }
+  assert(snap.state === 'degraded', `前置条件:已降级, 实际=${snap.state}`);
+  for (let f = 30; f < 40; f++) snap = fuser.push(makeFrame(HAND13), f * 400);
+  assert(snap.state === 'stable', `干扰消失后从 degraded 升回 stable, 实际=${snap.state}`);
+}
+
+// reset 清空超时计时器
+{
+  const fuser = new DetectionFuser();
+  for (let f = 0; f < 30; f++) {
+    const frame = makeFrame(HAND13);
+    if (f % 2 === 0) {
+      frame.push({ tileIndex: 5, confidence: 0.9, bbox: { x: 900, y: 200, w: 40, h: 56 } });
+    }
+    fuser.push(frame, f * 400);
+  }
+  fuser.reset();
+  const snap = fuser.push(makeFrame(HAND13), 99999);
+  assert(snap.state === 'collecting', `reset 后重新计时,不应仍是 degraded, 实际=${snap.state}`);
 }
 
 // ============================================================
