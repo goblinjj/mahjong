@@ -413,19 +413,26 @@ console.log('\n=== 测试9: 检测融合 - 状态机 ===');
   assert(snap.state === 'stable', `收敛后回到 stable, 实际=${snap.state}`);
 }
 
-// 持续不稳定超过 8 秒 → 降级为 degraded,输出仍只含确认存在的轨迹
+// 持续不稳定超过 8 秒 → 降级为 degraded,输出仍只含确认存在的轨迹。
+// 幻影框隔帧出现,命中率随总帧数的奇偶在窗口内摆动(如 2/5=0.4 与
+// 3/5=0.6),必须在两种奇偶下都断言,不能让通过与否取决于循环恰好停在
+// 哪一奇偶——那正是 presentRate 曾经卡在 0.6 时被放过的失败模式。
 {
   const fuser = new DetectionFuser();
   let snap;
-  for (let f = 0; f < 30; f++) {
+  for (let f = 0; f < 31; f++) {
     const frame = makeFrame(HAND13);
     if (f % 2 === 0) {
       frame.push({ tileIndex: 5, confidence: 0.9, bbox: { x: 900, y: 200, w: 40, h: 56 } });
     }
     snap = fuser.push(frame, f * 400);   // 30 帧 × 400ms = 11.6s > 8s
+    if (f === 29) {
+      assert(snap.state === 'degraded', `持续不稳定 8s 后降级(偶数帧数), 实际=${snap.state}`);
+      assert(snap.tiles.length === 13, `降级时输出不含待定轨迹(偶数帧数), 实际=${snap.tiles.length}`);
+    }
   }
-  assert(snap.state === 'degraded', `持续不稳定 8s 后降级, 实际=${snap.state}`);
-  assert(snap.tiles.length === 13, `降级时输出不含待定轨迹, 实际=${snap.tiles.length}`);
+  assert(snap.state === 'degraded', `持续不稳定 8s 后降级(奇数帧数), 实际=${snap.state}`);
+  assert(snap.tiles.length === 13, `降级时输出不含待定轨迹(奇数帧数), 实际=${snap.tiles.length}`);
 }
 
 // degraded 不是终态:判据重新满足应升回 stable

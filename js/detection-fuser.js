@@ -24,17 +24,29 @@ export const FuserState = {
  */
 export const DEFAULT_CONFIG = {
   windowSize: 5,          // 滑动窗口帧数
-  presentRate: 0.6,       // 出现率 ≥ 此值视为「确认存在」
+  // presentRate/pendingRate/voteRatio 三者都是「窗口内命中次数」算出的比例,
+  // 分子分母是整数,可达值是有限集合而非连续区间(windowSize=5 时非 0/1 的
+  // 可达值为 {0.2, 0.25, 0.333, 0.4, 0.5, 0.6, 0.667, 0.75, 0.8})。阈值一旦
+  // 卡在某个可达值上,`>=` 判据就会恒真或恒假 —— 已经在 voteRatio(曾为
+  // 0.6,恰是窗口内两类别可达的最小占比)和 presentRate(曾为 0.6,恰是
+  // 3/5 的 IEEE754 精确值)上各踩过一次。改动这三者中任意一个,或改动
+  // windowSize 本身,都必须重新核对新阈值没有落在可达集合上。
+  presentRate: 0.7,       // 出现率 ≥ 此值视为「确认存在」。0.6 曾是隔帧
+                           // 出现的幻影框(命中率 3/5=0.6)恰好达标的边界值,
+                           // 会周期性把幻影框误判为确认存在。0.7 落在可达值
+                           // 0.667 与 0.75 之间,两侧都有余量。
   pendingRate: 0.3,       // 出现率 < 此值视为噪声,老化删除
-  // 类别投票胜出占比下限。票随 windowSize=5 的滑动窗口,窗口内两个候选类别
-  // 只能分成 5:0/4:1/3:2,比例只能取 1.0/0.8/0.6 —— 0.6 是可达最小值,阈值
-  // 若取 0.6 则 ratio >= voteRatio 恒成立,闸门失效。取 0.7 意味着「5 帧里
-  // 至少 4 帧同类」,离 0.6/0.8 两侧都有余量,不卡在窗口能达到的边界值上。
-  voteRatio: 0.7,
+  voteRatio: 0.7,         // 类别投票胜出占比下限。窗口内两个候选类别只能
+                           // 分成 5:0/4:1/3:2,比例只能取 1.0/0.8/0.6 ——
+                           // 0.7 落在可达值 0.6 与 0.8 之间,意味着「5 帧里
+                           // 至少 4 帧同类」。
   stableFrames: 3,        // 输出连续一致所需帧数
   matchRadiusCoarse: 1.0, // 粗匹配阈值(牌宽倍数),用于估计全局位移
   matchRadiusFine: 0.4,   // 补偿后精匹配阈值(牌宽倍数)
   degradeAfterMs: 8000,   // 持续不稳定多久后降级
+  // 有 pending 轨迹、或本帧一张确认存在的牌都没有时,进度条封顶于此 ——
+  // 前者再攒多少帧也不会稳定,后者对着空气也不该显示满格,都是错误信号。
+  pendingProgressCap: 0.99,
   emaAlpha: 0.5,          // 轨迹位置/尺寸的 EMA 平滑系数
   minFramesForState: 3,   // 少于此帧数一律 COLLECTING
   outlierMinBoxes: 4,     // 少于此框数不做离群剔除(中位数不可靠)
@@ -96,6 +108,11 @@ export class DetectionFuser {
     this._now = 0;
     /** 本帧是否出现「检测类别与轨迹既有胜出类别不符」 */
     this._conflict = false;
+    /**
+     * push() 每次结算后缓存的完整快照;snapshot() 只读它,不重新计算、
+     * 不产生副作用。未 push 过时也要有合理的初值。
+     */
+    this._lastResult = { state: FuserState.COLLECTING, tiles: [], pending: 0, frames: 0, progress: 0 };
   }
 
   /**
@@ -122,13 +139,24 @@ export class DetectionFuser {
     this.frameSeq++;
     this._match(dets, tileW);
     this._ageOut();
+
+    const { tiles, pending } = this._classify();
+    this._lastResult = { tiles, pending, frames: this.frameSeq, ...this._judge(tiles, pending) };
     return this.snapshot();
   }
 
   /**
-   * 只读当前融合结果,不推进状态。
+   * 只读当前融合结果,不推进状态、不产生任何副作用 —— 单纯格式化
+   * push() 已经算好并缓存在 this._lastResult 里的值。可以任意多次调用。
+   */
+  snapshot() {
+    return this._lastResult;
+  }
+
+  /**
+   * 把轨迹按出现率与类别收敛度分三档。纯函数,不修改任何状态,可被
+   * push() 或测试反复调用而不影响结果。
    *
-   * 轨迹按出现率与类别收敛度分三档:
    *   确认存在(出现率 ≥ presentRate 且投票占比 ≥ voteRatio) → 计入 tiles
    *   待定(出现率在 [pendingRate, presentRate),或投票未收敛)  → 计入 pending
    *   噪声(出现率 < pendingRate) → 已在 _ageOut 中删除
@@ -138,7 +166,7 @@ export class DetectionFuser {
    * 的问题,只是变成稳定地给出 12 张,更糟。让它阻止稳定并提示用户,用户才
    * 知道该调整角度或光线。
    */
-  snapshot() {
+  _classify() {
     const { presentRate, voteRatio } = this.config;
     const present = [];
     let pending = 0;
@@ -160,17 +188,18 @@ export class DetectionFuser {
       }))
       .sort((a, b) => a.bbox.x - b.bbox.x);
 
-    return { tiles, pending, frames: this.frameSeq, ...this._judge(tiles, pending) };
+    return { tiles, pending };
   }
 
   /**
-   * 裁决状态与进度。每帧重新裁决,因此 DEGRADED 不是终态 ——
+   * 裁决状态与进度。每次 push() 重新裁决,因此 DEGRADED 不是终态 ——
    * 判据重新满足会直接升回 STABLE,降级只是解除「按钮永远不亮」的锁死。
    *
-   * 注意:本方法有副作用(维护连续一致计数与降级计时),只应由 snapshot() 调用一次。
+   * 注意:本方法有副作用(维护连续一致计数与降级计时),只应由 push() 调用
+   * 一次;snapshot() 不得调用它,否则「只读」就名不副实。
    */
   _judge(tiles, pending) {
-    const { minFramesForState, stableFrames, windowSize, degradeAfterMs } = this.config;
+    const { minFramesForState, stableFrames, windowSize, degradeAfterMs, pendingProgressCap } = this.config;
 
     // 输出的牌多重集是否与上一帧一致
     const sig = tiles.map((d) => d.tileIndex).sort((a, b) => a - b).join(',');
@@ -202,13 +231,14 @@ export class DetectionFuser {
     }
 
     // 进度取「帧数」与「连续一致帧数」两个分量的较小值。
-    // 有待定轨迹时封顶 0.99 —— 此时再攒多少帧也不会稳定,进度条不该显示满格。
+    // 有待定轨迹、或本帧没有任何确认存在的牌时,封顶 pendingProgressCap ——
+    // 前者攒多少帧也不会稳定,后者对着空气不该显示满格,都不是「可以确认」。
     let progress = Math.min(
       this.frameSeq / windowSize,
       this._consistent / stableFrames,
       1
     );
-    if (pending > 0) progress = Math.min(progress, 0.99);
+    if (pending > 0 || tiles.length === 0) progress = Math.min(progress, pendingProgressCap);
 
     return { state, progress };
   }
